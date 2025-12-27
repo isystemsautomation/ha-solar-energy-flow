@@ -50,9 +50,8 @@ class SolarEnergyFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
-    """Options flow (PID tuning) shown when user clicks Configure."""
-
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        # IMPORTANT: do NOT call super().__init__(config_entry)
         self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):

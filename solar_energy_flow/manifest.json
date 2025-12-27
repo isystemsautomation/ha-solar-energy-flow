@@ -1,0 +1,9 @@
+{
+  "domain": "solar_energy_flow",
+  "name": "Solar Energy Flow Controller",
+  "version": "0.1.0",
+  "documentation": "https://github.com/YOURUSERNAME/ha-solar-energy-flow",
+  "requirements": [],
+  "codeowners": ["@YOURUSERNAME"],
+  "config_flow": false
+}

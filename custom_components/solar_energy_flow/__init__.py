@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -19,10 +21,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    # Update coordinator interval when options change
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
     interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-    coordinator.update_interval = coordinator.update_interval.__class__(seconds=interval)
+
+    coordinator.update_interval = timedelta(seconds=interval)
     await coordinator.async_request_refresh()
 
 

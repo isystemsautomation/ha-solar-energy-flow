@@ -50,15 +50,17 @@ class SolarEnergyFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
+    """Options flow (PID tuning) shown when user clicks Configure."""
+
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        # IMPORTANT: do NOT call super().__init__(config_entry)
-        self.config_entry = config_entry
+        # config_entry is read-only in your HA version
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        o = self.config_entry.options
+        o = self._config_entry.options
 
         schema = vol.Schema(
             {
@@ -72,4 +74,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             }
         )
 
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+        )

@@ -19,6 +19,9 @@ from .const import (
     CONF_GRID_LIMITER_DEADBAND_W,
     CONF_PID_DEADBAND,
     CONF_RATE_LIMIT,
+    CONF_RUNTIME_MODE,
+    CONF_MANUAL_SP_VALUE,
+    CONF_MANUAL_OUT_VALUE,
     DEFAULT_ENABLED,
     DEFAULT_KD,
     DEFAULT_KI,
@@ -29,7 +32,14 @@ from .const import (
     DEFAULT_GRID_LIMITER_DEADBAND_W,
     DEFAULT_PID_DEADBAND,
     DEFAULT_RATE_LIMIT,
+    DEFAULT_RUNTIME_MODE,
+    DEFAULT_MANUAL_SP_VALUE,
+    DEFAULT_MANUAL_OUT_VALUE,
     DOMAIN,
+    RUNTIME_MODE_AUTO_SP,
+    RUNTIME_MODE_HOLD,
+    RUNTIME_MODE_MANUAL_OUT,
+    RUNTIME_MODE_MANUAL_SP,
 )
 from .coordinator import SolarEnergyFlowCoordinator
 
@@ -138,6 +148,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             EntityCategory.CONFIG,
             "points/s",
         ),
+        SolarEnergyFlowManualNumber(
+            coordinator,
+            entry,
+            CONF_MANUAL_SP_VALUE,
+            "Manual SP",
+            DEFAULT_MANUAL_SP_VALUE,
+            1.0,
+            -20000.0,
+            20000.0,
+        ),
+        SolarEnergyFlowManualNumber(
+            coordinator,
+            entry,
+            CONF_MANUAL_OUT_VALUE,
+            "Manual OUT",
+            DEFAULT_MANUAL_OUT_VALUE,
+            1.0,
+            -20000.0,
+            20000.0,
+        ),
     ]
 
     async_add_entities(entities)
@@ -211,6 +241,104 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
             min_val = float(options.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT))
             if value < min_val:
                 options[CONF_MIN_OUTPUT] = value
+
+        self.coordinator.apply_options(options)
+        self.hass.config_entries.async_update_entry(self._entry, options=options)
+        await self.coordinator.async_request_refresh()
+
+
+class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.BOX
+
+    def __init__(
+        self,
+        coordinator: SolarEnergyFlowCoordinator,
+        entry: ConfigEntry,
+        option_key: str,
+        name: str,
+        default: float,
+        step: float,
+        min_value: float | None,
+        max_value: float | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._option_key = option_key
+        self._default = default
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{option_key}"
+        self._attr_native_step = step
+        self._attr_native_min_value = min_value
+        self._attr_native_max_value = max_value
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer="Solar Energy Flow",
+            model="PID Controller",
+        )
+
+    @property
+    def native_value(self) -> float:
+        data = getattr(self.coordinator, "data", None)
+        if data is not None:
+            if self._option_key == CONF_MANUAL_SP_VALUE:
+                return data.manual_sp_value
+            return data.manual_out_value
+        try:
+            return float(self._entry.options.get(self._option_key, self._default))
+        except (TypeError, ValueError):
+            return self._default
+
+    def _runtime_mode(self) -> str:
+        data = getattr(self.coordinator, "data", None)
+        if data and getattr(data, "runtime_mode", None):
+            return data.runtime_mode
+        return self._entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+
+    def _mirror_value(self) -> float:
+        data = getattr(self.coordinator, "data", None)
+        if data is not None:
+            if self._option_key == CONF_MANUAL_SP_VALUE:
+                return data.manual_sp_value
+            return data.manual_out_value
+        try:
+            return float(self._entry.options.get(self._option_key, self._default))
+        except (TypeError, ValueError):
+            return self._default
+
+    async def _async_snap_back(self) -> None:
+        mirror = self._mirror_value()
+        if self._option_key == CONF_MANUAL_SP_VALUE:
+            self.coordinator._manual_sp_value = mirror
+        else:
+            self.coordinator._manual_out_value = mirror
+        self.async_write_ha_state()
+
+    async def async_set_native_value(self, value: float) -> None:
+        runtime_mode = self._runtime_mode()
+        allowed = False
+        if self._option_key == CONF_MANUAL_SP_VALUE:
+            allowed = runtime_mode in (RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD)
+        elif self._option_key == CONF_MANUAL_OUT_VALUE:
+            allowed = runtime_mode == RUNTIME_MODE_MANUAL_OUT
+
+        if not allowed:
+            await self._async_snap_back()
+            return
+
+        options = dict(self._entry.options)
+
+        options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
+        options.setdefault(CONF_RUNTIME_MODE, runtime_mode)
+        options.setdefault(CONF_MANUAL_SP_VALUE, self.coordinator._manual_sp_value)
+        options.setdefault(CONF_MANUAL_OUT_VALUE, self.coordinator._manual_out_value)
+        options[self._option_key] = value
+
+        if self._option_key == CONF_MANUAL_SP_VALUE:
+            self.coordinator._manual_sp_value = value
+        else:
+            self.coordinator._manual_out_value = value
 
         self.coordinator.apply_options(options)
         self.hass.config_entries.async_update_entry(self._entry, options=options)

@@ -41,6 +41,9 @@ from .const import (
     CONF_PID_DEADBAND,
     CONF_RATE_LIMIT,
     CONF_RATE_LIMITER_ENABLED,
+    CONF_RUNTIME_MODE,
+    CONF_MANUAL_OUT_VALUE,
+    CONF_MANUAL_SP_VALUE,
     DEFAULT_INVERT_PV,
     DEFAULT_INVERT_SP,
     DEFAULT_GRID_POWER_INVERT,
@@ -52,6 +55,9 @@ from .const import (
     DEFAULT_PID_DEADBAND,
     DEFAULT_RATE_LIMIT,
     DEFAULT_RATE_LIMITER_ENABLED,
+    DEFAULT_RUNTIME_MODE,
+    DEFAULT_MANUAL_OUT_VALUE,
+    DEFAULT_MANUAL_SP_VALUE,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
     GRID_LIMITER_TYPE_EXPORT,
@@ -59,6 +65,10 @@ from .const import (
     GRID_LIMITER_STATE_NORMAL,
     GRID_LIMITER_STATE_LIMITING_IMPORT,
     GRID_LIMITER_STATE_LIMITING_EXPORT,
+    RUNTIME_MODE_AUTO_SP,
+    RUNTIME_MODE_HOLD,
+    RUNTIME_MODE_MANUAL_OUT,
+    RUNTIME_MODE_MANUAL_SP,
 )
 from .pid import PID, PIDConfig
 
@@ -75,6 +85,9 @@ class FlowState:
     enabled: bool
     status: str
     limiter_state: str
+    runtime_mode: str
+    manual_sp_value: float
+    manual_out_value: float
 
 
 def _state_to_float(state) -> float | None:
@@ -204,6 +217,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self.hass = hass
         self.entry = entry
         self.options_cache: dict[str, Any] = dict(entry.options)
+        self._runtime_mode = entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
 
         interval = _get_update_interval_seconds(entry)
         super().__init__(
@@ -226,6 +240,12 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._last_output: float | None = None
         self._last_pv_for_pid: float | None = None
         self._last_sp_for_pid: float | None = None
+        self._manual_sp_value: float = _coerce_float(
+            entry.options.get(CONF_MANUAL_SP_VALUE, DEFAULT_MANUAL_SP_VALUE), DEFAULT_MANUAL_SP_VALUE
+        )
+        self._manual_out_value: float = _coerce_float(
+            entry.options.get(CONF_MANUAL_OUT_VALUE, DEFAULT_MANUAL_OUT_VALUE), DEFAULT_MANUAL_OUT_VALUE
+        )
 
     def _build_pid_config_from_options(self, options: Mapping[str, Any]) -> PIDConfig:
         min_output, max_output = _get_pid_limits_from_options(options)
@@ -259,12 +279,20 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self.options_cache = dict(options)
         interval_seconds = _get_update_interval_seconds_from_options(options)
         self.update_interval = timedelta(seconds=interval_seconds)
+        self._runtime_mode = options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        self._manual_sp_value = _coerce_float(
+            options.get(CONF_MANUAL_SP_VALUE, self._manual_sp_value), self._manual_sp_value
+        )
+        self._manual_out_value = _coerce_float(
+            options.get(CONF_MANUAL_OUT_VALUE, self._manual_out_value), self._manual_out_value
+        )
         self.pid.apply_options(self._build_pid_config_from_options(options))
 
     async def _async_update_data(self) -> FlowState:
         prev_limiter_state = self._limiter_state
         prev_sp_for_pid = self._last_sp_for_pid
         prev_pv_for_pid = self._last_pv_for_pid
+        prev_runtime_mode = self._runtime_mode
 
         enabled = self.entry.options.get(CONF_ENABLED, DEFAULT_ENABLED)
         min_output, max_output = _get_pid_limits_from_options(self.entry.options)
@@ -293,6 +321,23 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             0.0, _coerce_float(self.entry.options.get(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND), DEFAULT_PID_DEADBAND)
         )
         pid_mode = _get_pid_mode(self.entry)
+        runtime_mode = self.entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        if runtime_mode not in (
+            RUNTIME_MODE_AUTO_SP,
+            RUNTIME_MODE_MANUAL_SP,
+            RUNTIME_MODE_HOLD,
+            RUNTIME_MODE_MANUAL_OUT,
+        ):
+            runtime_mode = DEFAULT_RUNTIME_MODE
+        self._runtime_mode = runtime_mode
+        self._manual_sp_value = _coerce_float(
+            self.entry.options.get(CONF_MANUAL_SP_VALUE, self._manual_sp_value),
+            self._manual_sp_value if self._manual_sp_value is not None else DEFAULT_MANUAL_SP_VALUE,
+        )
+        self._manual_out_value = _coerce_float(
+            self.entry.options.get(CONF_MANUAL_OUT_VALUE, self._manual_out_value),
+            self._manual_out_value if self._manual_out_value is not None else DEFAULT_MANUAL_OUT_VALUE,
+        )
 
         pv_ent = _get_entity_id(self.entry, CONF_PROCESS_VALUE_ENTITY)
         sp_ent = _get_entity_id(self.entry, CONF_SETPOINT_ENTITY)
@@ -322,6 +367,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._last_output = safe_output
             self._last_pv_for_pid = None
             self._last_sp_for_pid = None
+            self._manual_out_value = safe_output
             return FlowState(
                 pv=pv,
                 sp=sp,
@@ -331,6 +377,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 enabled=False,
                 status="disabled",
                 limiter_state=GRID_LIMITER_STATE_NORMAL,
+                runtime_mode=runtime_mode,
+                manual_sp_value=self._manual_sp_value,
+                manual_out_value=self._manual_out_value,
             )
 
         pv_for_pid: float | None
@@ -358,7 +407,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                     new_limiter_state = GRID_LIMITER_STATE_LIMITING_EXPORT
 
         pv_for_pid = pv
-        sp_for_pid = sp
+        sp_for_pid = self._manual_sp_value if runtime_mode == RUNTIME_MODE_MANUAL_SP else sp
 
         if limiter_active and new_limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
             pv_for_pid = grid_power
@@ -370,6 +419,50 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             status = GRID_LIMITER_STATE_LIMITING_EXPORT
         elif limiter_enabled and grid_power is None:
             status = "grid_power_unavailable"
+
+        if runtime_mode == RUNTIME_MODE_HOLD:
+            held_output = self._last_output if self._last_output is not None else min_output
+            if out_ent:
+                await _set_output(self.hass, out_ent, held_output)
+            self._limiter_state = GRID_LIMITER_STATE_NORMAL
+            self._manual_out_value = held_output
+            return FlowState(
+                pv=pv,
+                sp=sp,
+                grid_power=grid_power,
+                out=held_output,
+                error=None,
+                enabled=True,
+                status="hold",
+                limiter_state=self._limiter_state,
+                runtime_mode=runtime_mode,
+                manual_sp_value=self._manual_sp_value,
+                manual_out_value=self._manual_out_value,
+            )
+
+        if runtime_mode == RUNTIME_MODE_MANUAL_OUT:
+            if prev_runtime_mode != RUNTIME_MODE_MANUAL_OUT:
+                if self._last_output is not None:
+                    self._manual_out_value = self._last_output
+                else:
+                    self._manual_out_value = _coerce_float(self._manual_out_value, DEFAULT_MANUAL_OUT_VALUE)
+            if out_ent:
+                await _set_output(self.hass, out_ent, self._manual_out_value)
+            self._last_output = self._manual_out_value
+            self._limiter_state = GRID_LIMITER_STATE_NORMAL
+            return FlowState(
+                pv=pv,
+                sp=sp,
+                grid_power=grid_power,
+                out=self._manual_out_value,
+                error=None,
+                enabled=True,
+                status="manual_out",
+                limiter_state=self._limiter_state,
+                runtime_mode=runtime_mode,
+                manual_sp_value=self._manual_sp_value,
+                manual_out_value=self._manual_out_value,
+            )
 
         if pv_for_pid is None or sp_for_pid is None:
             self.pid.reset()
@@ -386,7 +479,13 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 enabled=True,
                 status="missing_input",
                 limiter_state=new_limiter_state,
+                runtime_mode=runtime_mode,
+                manual_sp_value=self._manual_sp_value,
+                manual_out_value=self._manual_out_value,
             )
+
+        if runtime_mode == RUNTIME_MODE_AUTO_SP and sp is not None:
+            self._manual_sp_value = sp
 
         error = sp_for_pid - pv_for_pid
         if pid_mode == PID_MODE_REVERSE:
@@ -396,12 +495,16 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             error = 0.0
 
         current_output = self._last_output
-        bumpless_needed = False
-        if current_output is not None:
+        bumpless_needed = prev_runtime_mode == RUNTIME_MODE_MANUAL_OUT
+        if not bumpless_needed and current_output is not None:
             if new_limiter_state != prev_limiter_state:
                 bumpless_needed = True
             elif prev_sp_for_pid is not None and sp_for_pid is not None and sp_for_pid != prev_sp_for_pid:
                 bumpless_needed = True
+
+        if prev_runtime_mode == RUNTIME_MODE_MANUAL_OUT:
+            current_output = self._manual_out_value
+            self._last_output = current_output
 
         if bumpless_needed and current_output is not None:
             self.pid.bumpless_transfer(current_output=current_output, error=error, pv=pv_for_pid)
@@ -425,6 +528,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._last_output = out
         self._last_pv_for_pid = pv_for_pid
         self._last_sp_for_pid = sp_for_pid
+        if runtime_mode != RUNTIME_MODE_MANUAL_OUT:
+            self._manual_out_value = out
 
         return FlowState(
             pv=pv_for_pid,
@@ -435,6 +540,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             enabled=True,
             status=status,
             limiter_state=new_limiter_state,
+            runtime_mode=runtime_mode,
+            manual_sp_value=self._manual_sp_value,
+            manual_out_value=self._manual_out_value,
         )
 
 # Manual test checklist:

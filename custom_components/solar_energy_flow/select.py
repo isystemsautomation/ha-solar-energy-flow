@@ -14,15 +14,25 @@ from .const import (
     CONF_GRID_LIMITER_LIMIT_W,
     CONF_GRID_LIMITER_TYPE,
     CONF_PID_DEADBAND,
+    CONF_RUNTIME_MODE,
+    CONF_MANUAL_SP_VALUE,
+    CONF_MANUAL_OUT_VALUE,
     DEFAULT_ENABLED,
     DEFAULT_GRID_LIMITER_DEADBAND_W,
     DEFAULT_GRID_LIMITER_ENABLED,
     DEFAULT_GRID_LIMITER_LIMIT_W,
     DEFAULT_PID_DEADBAND,
     DEFAULT_GRID_LIMITER_TYPE,
+    DEFAULT_RUNTIME_MODE,
+    DEFAULT_MANUAL_SP_VALUE,
+    DEFAULT_MANUAL_OUT_VALUE,
     DOMAIN,
     GRID_LIMITER_TYPE_EXPORT,
     GRID_LIMITER_TYPE_IMPORT,
+    RUNTIME_MODE_AUTO_SP,
+    RUNTIME_MODE_HOLD,
+    RUNTIME_MODE_MANUAL_OUT,
+    RUNTIME_MODE_MANUAL_SP,
 )
 from .coordinator import SolarEnergyFlowCoordinator
 
@@ -38,6 +48,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "Grid limiter type",
                 [GRID_LIMITER_TYPE_IMPORT, GRID_LIMITER_TYPE_EXPORT],
                 DEFAULT_GRID_LIMITER_TYPE,
+            ),
+            SolarEnergyFlowSelect(
+                coordinator,
+                entry,
+                CONF_RUNTIME_MODE,
+                "Runtime mode",
+                [RUNTIME_MODE_AUTO_SP, RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD, RUNTIME_MODE_MANUAL_OUT],
+                DEFAULT_RUNTIME_MODE,
             ),
         ]
     )
@@ -86,6 +104,9 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
         options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
         options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
         options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
+        options.setdefault(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        options.setdefault(CONF_MANUAL_SP_VALUE, DEFAULT_MANUAL_SP_VALUE)
+        options.setdefault(CONF_MANUAL_OUT_VALUE, DEFAULT_MANUAL_OUT_VALUE)
 
         if self._option_key == CONF_GRID_LIMITER_TYPE and option not in (
             GRID_LIMITER_TYPE_IMPORT,

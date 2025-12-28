@@ -88,18 +88,6 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 }
             ),
             self._validate_output_range,
-        default_interval = max(o.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL), 1)
-
-        schema = vol.Schema(
-            {
-                vol.Optional(CONF_ENABLED, default=o.get(CONF_ENABLED, DEFAULT_ENABLED)): bool,
-                vol.Optional(CONF_KP, default=o.get(CONF_KP, DEFAULT_KP)): vol.Coerce(float),
-                vol.Optional(CONF_KI, default=o.get(CONF_KI, DEFAULT_KI)): vol.Coerce(float),
-                vol.Optional(CONF_KD, default=o.get(CONF_KD, DEFAULT_KD)): vol.Coerce(float),
-                vol.Optional(CONF_MIN_OUTPUT, default=o.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)): vol.Coerce(float),
-                vol.Optional(CONF_MAX_OUTPUT, default=o.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)): vol.Coerce(float),
-                vol.Optional(CONF_UPDATE_INTERVAL, default=default_interval): vol.All(vol.Coerce(int), vol.Range(min=1)),
-            }
         )
 
         return self.async_show_form(

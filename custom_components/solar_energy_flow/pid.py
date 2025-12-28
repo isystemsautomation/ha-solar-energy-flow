@@ -70,12 +70,22 @@ class PID:
         return out, error
 
     def apply_bumpless(self, current_output: float, pv: float, error: float) -> None:
-        d_term = 0.0
+        now = time.monotonic()
+        if self._prev_t is None:
+            dt = 0.0
+        else:
+            dt = max(1e-6, now - self._prev_t)
+
+        if self._prev_pv is None or dt == 0.0:
+            d_term = 0.0
+        else:
+            d_term = -self.cfg.kd * (pv - self._prev_pv) / dt
+
         if self.cfg.ki != 0:
             self._integral = (current_output - self.cfg.kp * error - d_term) / self.cfg.ki
         else:
             self._integral = 0.0
-        now = time.monotonic()
+
         self._prev_pv = pv
         self._prev_t = now
         self._prev_error = error

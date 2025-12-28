@@ -18,7 +18,7 @@
     "step": {
       "init": {
         "title": "PID settings",
-        "description": "Configure wiring, inversion, mode, and update interval.",
+        "description": "Configure wiring, inversion, mode, and update interval. Grid power is used for automatic limiter override.",
         "data": {
           "process_value_entity": "Process value sensor (PV)",
           "setpoint_entity": "Setpoint entity (target)",

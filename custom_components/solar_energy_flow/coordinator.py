@@ -36,8 +36,6 @@ from .const import (
     CONF_GRID_LIMITER_TYPE,
     CONF_GRID_LIMITER_LIMIT_W,
     CONF_GRID_LIMITER_DEADBAND_W,
-    CONF_SETPOINT_SOURCE,
-    CONF_GRID_TARGET_W,
     CONF_PID_DEADBAND,
     DEFAULT_INVERT_PV,
     DEFAULT_INVERT_SP,
@@ -47,8 +45,6 @@ from .const import (
     DEFAULT_GRID_LIMITER_TYPE,
     DEFAULT_GRID_LIMITER_LIMIT_W,
     DEFAULT_GRID_LIMITER_DEADBAND_W,
-    DEFAULT_SETPOINT_SOURCE,
-    DEFAULT_GRID_TARGET_W,
     DEFAULT_PID_DEADBAND,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
@@ -57,8 +53,6 @@ from .const import (
     GRID_LIMITER_STATE_NORMAL,
     GRID_LIMITER_STATE_LIMITING_IMPORT,
     GRID_LIMITER_STATE_LIMITING_EXPORT,
-    SETPOINT_SOURCE_MANUAL,
-    SETPOINT_SOURCE_GRID_TARGET,
 )
 from .pid import PID, PIDConfig
 
@@ -152,14 +146,6 @@ def _get_limiter_type(entry: ConfigEntry) -> str:
     return DEFAULT_GRID_LIMITER_TYPE
 
 
-def _get_setpoint_source(entry: ConfigEntry) -> str:
-    source = entry.options.get(CONF_SETPOINT_SOURCE, DEFAULT_SETPOINT_SOURCE)
-    if source in (SETPOINT_SOURCE_MANUAL, SETPOINT_SOURCE_GRID_TARGET):
-        return source
-    _LOGGER.warning("Invalid setpoint source '%s'; falling back to '%s'", source, DEFAULT_SETPOINT_SOURCE)
-    return DEFAULT_SETPOINT_SOURCE
-
-
 async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> None:
     domain = entity_id.split(".", 1)[0]
 
@@ -239,10 +225,6 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 DEFAULT_GRID_LIMITER_DEADBAND_W,
             ),
         )
-        setpoint_source = _get_setpoint_source(self.entry)
-        grid_target_w = _coerce_float(
-            self.entry.options.get(CONF_GRID_TARGET_W, DEFAULT_GRID_TARGET_W), DEFAULT_GRID_TARGET_W
-        )
         pid_deadband = max(
             0.0, _coerce_float(self.entry.options.get(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND), DEFAULT_PID_DEADBAND)
         )
@@ -286,7 +268,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         status = "running"
 
         new_limiter_state = GRID_LIMITER_STATE_NORMAL
-        if limiter_enabled and grid_power is not None:
+        limiter_active = limiter_enabled and grid_power is not None
+        if limiter_active:
             if limiter_type == GRID_LIMITER_TYPE_IMPORT:
                 if self._limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
                     if grid_power < limiter_limit_w - limiter_deadband_w:
@@ -307,19 +290,16 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         pv_for_pid = pv
         sp_for_pid = sp
 
-        if new_limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
+        if limiter_active and new_limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
             pv_for_pid = grid_power
             sp_for_pid = limiter_limit_w
             status = GRID_LIMITER_STATE_LIMITING_IMPORT
-        elif new_limiter_state == GRID_LIMITER_STATE_LIMITING_EXPORT:
+        elif limiter_active and new_limiter_state == GRID_LIMITER_STATE_LIMITING_EXPORT:
             pv_for_pid = grid_power
             sp_for_pid = -limiter_limit_w
             status = GRID_LIMITER_STATE_LIMITING_EXPORT
-        else:
-            if setpoint_source == SETPOINT_SOURCE_GRID_TARGET:
-                sp_for_pid = grid_target_w
-                if invert_sp:
-                    sp_for_pid = -sp_for_pid
+        elif limiter_enabled and grid_power is None:
+            status = "grid_power_unavailable"
 
         if pv_for_pid is None or sp_for_pid is None:
             self.pid.reset()

@@ -13,22 +13,16 @@ from .const import (
     CONF_GRID_LIMITER_ENABLED,
     CONF_GRID_LIMITER_LIMIT_W,
     CONF_GRID_LIMITER_TYPE,
-    CONF_GRID_TARGET_W,
     CONF_PID_DEADBAND,
-    CONF_SETPOINT_SOURCE,
     DEFAULT_ENABLED,
     DEFAULT_GRID_LIMITER_DEADBAND_W,
     DEFAULT_GRID_LIMITER_ENABLED,
     DEFAULT_GRID_LIMITER_LIMIT_W,
-    DEFAULT_GRID_TARGET_W,
     DEFAULT_PID_DEADBAND,
-    DEFAULT_SETPOINT_SOURCE,
     DEFAULT_GRID_LIMITER_TYPE,
     DOMAIN,
     GRID_LIMITER_TYPE_EXPORT,
     GRID_LIMITER_TYPE_IMPORT,
-    SETPOINT_SOURCE_GRID_TARGET,
-    SETPOINT_SOURCE_MANUAL,
 )
 from .coordinator import SolarEnergyFlowCoordinator
 
@@ -44,14 +38,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "Solar Energy Flow Grid Limiter Type",
                 [GRID_LIMITER_TYPE_IMPORT, GRID_LIMITER_TYPE_EXPORT],
                 DEFAULT_GRID_LIMITER_TYPE,
-            ),
-            SolarEnergyFlowSelect(
-                coordinator,
-                entry,
-                CONF_SETPOINT_SOURCE,
-                "Solar Energy Flow Setpoint Source",
-                [SETPOINT_SOURCE_MANUAL, SETPOINT_SOURCE_GRID_TARGET],
-                DEFAULT_SETPOINT_SOURCE,
             ),
         ]
     )
@@ -99,7 +85,6 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
         options.setdefault(CONF_GRID_LIMITER_ENABLED, DEFAULT_GRID_LIMITER_ENABLED)
         options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
         options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
-        options.setdefault(CONF_GRID_TARGET_W, DEFAULT_GRID_TARGET_W)
         options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
 
         if self._option_key == CONF_GRID_LIMITER_TYPE and option not in (
@@ -107,12 +92,6 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
             GRID_LIMITER_TYPE_EXPORT,
         ):
             option = DEFAULT_GRID_LIMITER_TYPE
-
-        if self._option_key == CONF_SETPOINT_SOURCE and option not in (
-            SETPOINT_SOURCE_MANUAL,
-            SETPOINT_SOURCE_GRID_TARGET,
-        ):
-            option = DEFAULT_SETPOINT_SOURCE
 
         options[self._option_key] = option
 

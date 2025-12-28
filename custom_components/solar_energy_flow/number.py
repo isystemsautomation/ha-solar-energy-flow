@@ -17,7 +17,6 @@ from .const import (
     CONF_MIN_OUTPUT,
     CONF_GRID_LIMITER_LIMIT_W,
     CONF_GRID_LIMITER_DEADBAND_W,
-    CONF_GRID_TARGET_W,
     CONF_PID_DEADBAND,
     DEFAULT_ENABLED,
     DEFAULT_KD,
@@ -27,7 +26,6 @@ from .const import (
     DEFAULT_MIN_OUTPUT,
     DEFAULT_GRID_LIMITER_LIMIT_W,
     DEFAULT_GRID_LIMITER_DEADBAND_W,
-    DEFAULT_GRID_TARGET_W,
     DEFAULT_PID_DEADBAND,
     DOMAIN,
 )
@@ -73,7 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             coordinator,
             entry,
             CONF_GRID_LIMITER_LIMIT_W,
-            "Solar Energy Flow Grid Limit",
+            "Solar Energy Flow Grid Limiter Limit (W)",
             DEFAULT_GRID_LIMITER_LIMIT_W,
             10.0,
             0.0,
@@ -84,22 +82,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             coordinator,
             entry,
             CONF_GRID_LIMITER_DEADBAND_W,
-            "Solar Energy Flow Grid Deadband",
+            "Solar Energy Flow Grid Limiter Deadband (W)",
             DEFAULT_GRID_LIMITER_DEADBAND_W,
             10.0,
             0.0,
-            2000.0,
-            None,
-        ),
-        SolarEnergyFlowNumber(
-            coordinator,
-            entry,
-            CONF_GRID_TARGET_W,
-            "Solar Energy Flow Grid Target",
-            DEFAULT_GRID_TARGET_W,
-            10.0,
-            -5000.0,
-            5000.0,
+            20000.0,
             None,
         ),
         SolarEnergyFlowNumber(
@@ -167,7 +154,6 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
         options.setdefault(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
         options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
         options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
-        options.setdefault(CONF_GRID_TARGET_W, DEFAULT_GRID_TARGET_W)
         options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
 
         options[self._option_key] = value

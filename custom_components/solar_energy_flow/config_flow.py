@@ -32,8 +32,6 @@ from .const import (
     CONF_GRID_LIMITER_TYPE,
     CONF_GRID_LIMITER_LIMIT_W,
     CONF_GRID_LIMITER_DEADBAND_W,
-    CONF_SETPOINT_SOURCE,
-    CONF_GRID_TARGET_W,
     CONF_PID_DEADBAND,
     DEFAULT_INVERT_PV,
     DEFAULT_INVERT_SP,
@@ -43,8 +41,6 @@ from .const import (
     DEFAULT_GRID_LIMITER_TYPE,
     DEFAULT_GRID_LIMITER_LIMIT_W,
     DEFAULT_GRID_LIMITER_DEADBAND_W,
-    DEFAULT_SETPOINT_SOURCE,
-    DEFAULT_GRID_TARGET_W,
     DEFAULT_PID_DEADBAND,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
@@ -142,8 +138,6 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_GRID_LIMITER_DEADBAND_W: o.get(
                 CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W
             ),
-            CONF_SETPOINT_SOURCE: o.get(CONF_SETPOINT_SOURCE, DEFAULT_SETPOINT_SOURCE),
-            CONF_GRID_TARGET_W: o.get(CONF_GRID_TARGET_W, DEFAULT_GRID_TARGET_W),
             CONF_PID_DEADBAND: o.get(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND),
             CONF_GRID_POWER_ENTITY: o.get(
                 CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY)
@@ -184,8 +178,6 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             }
 
             return self.async_create_entry(title="", data={**preserved, **cleaned})
-
-            defaults = cleaned
 
         return self.async_show_form(
             step_id="init",

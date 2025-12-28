@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
 
@@ -32,7 +32,6 @@ class _BaseFlowSensor(CoordinatorEntity, SensorEntity):
             name=entry.title,
             manufacturer="Solar Energy Flow",
             model="PID Controller",
-            entry_type=DeviceEntryType.SERVICE,
         )
 
 

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import time
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -16,12 +20,14 @@ class PIDConfig:
 class PID:
     """Simple PID with anti-windup via integral clamping and derivative on measurement."""
 
-    def __init__(self, cfg: PIDConfig) -> None:
+    def __init__(self, cfg: PIDConfig, *, entry_id: str | None = None) -> None:
         self.cfg = cfg
         self._integral = 0.0
         self._prev_pv: float | None = None
         self._prev_t: float | None = None
         self._prev_error: float | None = None
+        if entry_id:
+            _LOGGER.warning("PIDController CREATED entry_id=%s", entry_id)
 
     def update_config(self, cfg: PIDConfig) -> None:
         self.cfg = cfg
@@ -31,6 +37,12 @@ class PID:
         self._prev_pv = None
         self._prev_t = None
         self._prev_error = None
+
+    def apply_options(self, cfg: PIDConfig) -> None:
+        """Apply new tuning without resetting accumulated state."""
+
+        _LOGGER.warning("PIDController APPLY runtime options; no reset")
+        self.update_config(cfg)
 
     def step(self, pv: float, error: float) -> tuple[float, float]:
         """Return (output, error)."""
@@ -69,14 +81,13 @@ class PID:
         self._prev_error = error
         return out, error
 
-    def apply_bumpless(self, current_output: float, pv: float, error: float) -> None:
-        now = time.monotonic()
-        if self._prev_t is None:
-            dt = 0.0
-        else:
-            dt = max(1e-6, now - self._prev_t)
+    def bumpless_transfer(self, current_output: float, error: float, pv: float | None) -> None:
+        """Adjust integral to avoid output jumps when mode/setpoint changes."""
 
-        if self._prev_pv is None or dt == 0.0:
+        now = time.monotonic()
+        dt = 0.0 if self._prev_t is None else max(1e-6, now - self._prev_t)
+
+        if pv is None or self._prev_pv is None or dt == 0.0:
             d_term = 0.0
         else:
             d_term = -self.cfg.kd * (pv - self._prev_pv) / dt

@@ -55,6 +55,7 @@ class SolarEnergyFlowEnabledSwitch(CoordinatorEntity, SwitchEntity):
         options = dict(self._entry.options)
         options[CONF_ENABLED] = enabled
 
+        self.coordinator.apply_options(options)
         self.hass.config_entries.async_update_entry(self._entry, options=options)
         await self.coordinator.async_request_refresh()
 
@@ -89,5 +90,6 @@ class SolarEnergyFlowGridLimiterSwitch(CoordinatorEntity, SwitchEntity):
         options[CONF_GRID_LIMITER_ENABLED] = enabled
         options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
 
+        self.coordinator.apply_options(options)
         self.hass.config_entries.async_update_entry(self._entry, options=options)
         await self.coordinator.async_request_refresh()

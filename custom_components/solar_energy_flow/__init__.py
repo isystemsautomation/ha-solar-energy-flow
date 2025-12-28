@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import timedelta
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, GRID_LIMITER_STATE_NORMAL, PLATFORMS
-from .coordinator import SolarEnergyFlowCoordinator, _get_update_interval_seconds
+from .const import DOMAIN, PLATFORMS
+from .coordinator import SolarEnergyFlowCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -38,12 +40,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    interval = _get_update_interval_seconds(entry)
+    new_options = dict(entry.options)
+    old_options = coordinator.options_cache
 
-    coordinator.update_interval = timedelta(seconds=interval)
-    coordinator.pid.reset()
-    coordinator._limiter_state = GRID_LIMITER_STATE_NORMAL  # noqa: SLF001
-    coordinator._last_output = None  # noqa: SLF001
+    if old_options == new_options:
+        _LOGGER.debug("Options unchanged for %s; skipping handling", entry.entry_id)
+        return
+
+    coordinator.options_cache = new_options
+
+    if coordinator.options_require_reload(old_options, new_options):
+        _LOGGER.warning("Wiring change detected for %s; reloading entry", entry.entry_id)
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
+    coordinator.apply_options(new_options)
     await coordinator.async_request_refresh()
 
 

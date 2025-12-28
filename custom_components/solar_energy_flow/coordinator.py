@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 from datetime import timedelta
+from typing import Mapping, Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
@@ -97,6 +98,17 @@ def _get_update_interval_seconds(entry: ConfigEntry) -> int:
     return interval
 
 
+def _get_update_interval_seconds_from_options(options: Mapping[str, Any]) -> int:
+    raw_interval = options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+    try:
+        interval = int(raw_interval)
+    except (TypeError, ValueError):
+        return DEFAULT_UPDATE_INTERVAL
+    if interval < 1:
+        return 1
+    return interval
+
+
 def _get_pid_limits(entry: ConfigEntry) -> tuple[float, float]:
     raw_min = entry.options.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)
     raw_max = entry.options.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
@@ -126,6 +138,22 @@ def _coerce_float(value, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _get_pid_limits_from_options(options: Mapping[str, Any]) -> tuple[float, float]:
+    raw_min = options.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)
+    raw_max = options.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
+
+    try:
+        min_output = float(raw_min)
+        max_output = float(raw_max)
+    except (TypeError, ValueError):
+        return DEFAULT_MIN_OUTPUT, DEFAULT_MAX_OUTPUT
+
+    if min_output > max_output:
+        min_output, max_output = max_output, min_output
+
+    return min_output, max_output
 
 
 def _get_pid_mode(entry: ConfigEntry) -> str:
@@ -170,6 +198,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
+        self.options_cache: dict[str, Any] = dict(entry.options)
 
         interval = _get_update_interval_seconds(entry)
         super().__init__(
@@ -187,23 +216,50 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             min_output=min_output,
             max_output=max_output,
         )
-        self.pid = PID(cfg)
+        self.pid = PID(cfg, entry_id=entry.entry_id)
         self._limiter_state = GRID_LIMITER_STATE_NORMAL
         self._last_output: float | None = None
+        self._last_pv_for_pid: float | None = None
+        self._last_sp_for_pid: float | None = None
 
-    def _refresh_pid_config(self) -> None:
-        min_output, max_output = _get_pid_limits(self.entry)
-        cfg = PIDConfig(
-            kp=_coerce_float(self.entry.options.get(CONF_KP, DEFAULT_KP), DEFAULT_KP),
-            ki=_coerce_float(self.entry.options.get(CONF_KI, DEFAULT_KI), DEFAULT_KI),
-            kd=_coerce_float(self.entry.options.get(CONF_KD, DEFAULT_KD), DEFAULT_KD),
+    def _build_pid_config_from_options(self, options: Mapping[str, Any]) -> PIDConfig:
+        min_output, max_output = _get_pid_limits_from_options(options)
+        return PIDConfig(
+            kp=_coerce_float(options.get(CONF_KP, DEFAULT_KP), DEFAULT_KP),
+            ki=_coerce_float(options.get(CONF_KI, DEFAULT_KI), DEFAULT_KI),
+            kd=_coerce_float(options.get(CONF_KD, DEFAULT_KD), DEFAULT_KD),
             min_output=min_output,
             max_output=max_output,
         )
-        self.pid.update_config(cfg)
+
+    def options_require_reload(self, old: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
+        wiring_keys = {
+            CONF_PROCESS_VALUE_ENTITY,
+            CONF_SETPOINT_ENTITY,
+            CONF_OUTPUT_ENTITY,
+            CONF_GRID_POWER_ENTITY,
+            CONF_INVERT_PV,
+            CONF_INVERT_SP,
+            CONF_GRID_POWER_INVERT,
+        }
+
+        for key in wiring_keys:
+            if old.get(key) != new.get(key):
+                return True
+        return False
+
+    def apply_options(self, options: Mapping[str, Any]) -> None:
+        """Apply runtime tuning without resetting PID state."""
+
+        self.options_cache = dict(options)
+        interval_seconds = _get_update_interval_seconds_from_options(options)
+        self.update_interval = timedelta(seconds=interval_seconds)
+        self.pid.apply_options(self._build_pid_config_from_options(options))
 
     async def _async_update_data(self) -> FlowState:
-        self._refresh_pid_config()
+        prev_limiter_state = self._limiter_state
+        prev_sp_for_pid = self._last_sp_for_pid
+        prev_pv_for_pid = self._last_pv_for_pid
 
         enabled = self.entry.options.get(CONF_ENABLED, DEFAULT_ENABLED)
         invert_pv = self.entry.options.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)
@@ -252,6 +308,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self.pid.reset()
             self._limiter_state = GRID_LIMITER_STATE_NORMAL
             self._last_output = None
+            self._last_pv_for_pid = None
+            self._last_sp_for_pid = None
             return FlowState(
                 pv=pv,
                 sp=sp,
@@ -305,6 +363,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self.pid.reset()
             self._limiter_state = GRID_LIMITER_STATE_NORMAL
             self._last_output = None
+            self._last_pv_for_pid = None
+            self._last_sp_for_pid = None
             return FlowState(
                 pv=pv,
                 sp=sp_for_pid,
@@ -323,12 +383,23 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         if new_limiter_state == GRID_LIMITER_STATE_NORMAL and pid_deadband > 0 and abs(error) < pid_deadband:
             error = 0.0
 
-        if new_limiter_state != self._limiter_state and self._last_output is not None:
-            self.pid.apply_bumpless(current_output=self._last_output, pv=pv_for_pid, error=error)
+        current_output = self._last_output
+        bumpless_needed = False
+        if current_output is not None:
+            if new_limiter_state != prev_limiter_state:
+                bumpless_needed = True
+            elif prev_sp_for_pid is not None and sp_for_pid is not None and sp_for_pid != prev_sp_for_pid:
+                bumpless_needed = True
+
+        if bumpless_needed and current_output is not None:
+            self.pid.bumpless_transfer(current_output=current_output, error=error, pv=pv_for_pid)
+
         self._limiter_state = new_limiter_state
 
         out, err = self.pid.step(pv=pv_for_pid, error=error)
         self._last_output = out
+        self._last_pv_for_pid = pv_for_pid
+        self._last_sp_for_pid = sp_for_pid
 
         if out_ent:
             await _set_output(self.hass, out_ent, out)
@@ -345,3 +416,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             status=status,
             limiter_state=new_limiter_state,
         )
+
+# Manual test checklist:
+# 1) change limiter limit while running -> output continues smoothly (no jump to 0)
+# 2) change deadband -> no reset
+# 3) change kp/ki -> no reset
+# 4) start a big load to trigger limiter -> smooth transition; stop load -> smooth return.

@@ -9,6 +9,12 @@ from .const import DOMAIN, PLATFORMS, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTER
 from .coordinator import SolarEnergyFlowCoordinator
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up via YAML (not supported) or allow config flow to run."""
+    # No YAML configuration is supported; return True so the config flow can be used.
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SolarEnergyFlowCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

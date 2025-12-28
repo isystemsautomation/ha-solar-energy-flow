@@ -224,7 +224,6 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self.pid = PID(cfg, entry_id=entry.entry_id)
         self._limiter_state = GRID_LIMITER_STATE_NORMAL
         self._last_output: float | None = None
-        self._last_output_time: float | None = None
         self._last_pv_for_pid: float | None = None
         self._last_sp_for_pid: float | None = None
 
@@ -321,7 +320,6 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             if out_ent:
                 await _set_output(self.hass, out_ent, safe_output)
             self._last_output = safe_output
-            self._last_output_time = now
             self._last_pv_for_pid = None
             self._last_sp_for_pid = None
             return FlowState(
@@ -377,7 +375,6 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self.pid.reset()
             self._limiter_state = GRID_LIMITER_STATE_NORMAL
             self._last_output = None
-            self._last_output_time = None
             self._last_pv_for_pid = None
             self._last_sp_for_pid = None
             return FlowState(
@@ -411,18 +408,14 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         self._limiter_state = new_limiter_state
 
-        out, err = self.pid.step(pv=pv_for_pid, error=error)
+        out, err = self.pid.step(
+            pv=pv_for_pid,
+            error=error,
+            last_output=self._last_output,
+            rate_limiter_enabled=rate_limiter_enabled,
+            rate_limit=rate_limit,
+        )
         now = time.monotonic()
-        if (
-            rate_limiter_enabled
-            and rate_limit > 0
-            and self._last_output is not None
-            and self._last_output_time is not None
-        ):
-            dt_seconds = max(1e-6, now - self._last_output_time)
-            max_delta = rate_limit * dt_seconds
-            out = max(min_output, min(max_output, out))
-            out = max(self._last_output - max_delta, min(self._last_output + max_delta, out))
 
         if out_ent:
             await _set_output(self.hass, out_ent, out)
@@ -430,7 +423,6 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             _LOGGER.warning("No output entity configured.")
 
         self._last_output = out
-        self._last_output_time = now
         self._last_pv_for_pid = pv_for_pid
         self._last_sp_for_pid = sp_for_pid
 

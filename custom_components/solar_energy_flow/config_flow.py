@@ -60,6 +60,21 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         self._config_entry = config_entry
 
     @staticmethod
+    def _coerce_float(value, default):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _coerce_int(value, default, min_value=1):
+        try:
+            int_val = int(value)
+        except (TypeError, ValueError):
+            return default
+        return max(min_value, int_val)
+
+    @staticmethod
     def _validate_output_range(data: dict) -> dict:
         min_out = data.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)
         max_out = data.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
@@ -72,11 +87,11 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         o = self._config_entry.options
-        default_min_output = o.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)
-        default_max_output = o.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
+        default_min_output = self._coerce_float(o.get(CONF_MIN_OUTPUT), DEFAULT_MIN_OUTPUT)
+        default_max_output = self._coerce_float(o.get(CONF_MAX_OUTPUT), DEFAULT_MAX_OUTPUT)
         if default_max_output < default_min_output:
             default_max_output = default_min_output
-        default_interval = max(o.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL), 1)
+        default_interval = self._coerce_int(o.get(CONF_UPDATE_INTERVAL), DEFAULT_UPDATE_INTERVAL, min_value=1)
 
         schema = vol.All(
             vol.Schema(

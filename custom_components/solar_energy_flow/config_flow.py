@@ -140,15 +140,21 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             ),
             CONF_PID_DEADBAND: o.get(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND),
             CONF_GRID_POWER_ENTITY: o.get(
-                CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY)
+                CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY, "")
             ),
         }
 
         defaults = {
-            CONF_PROCESS_VALUE_ENTITY: o.get(CONF_PROCESS_VALUE_ENTITY, self._config_entry.data[CONF_PROCESS_VALUE_ENTITY]),
-            CONF_SETPOINT_ENTITY: o.get(CONF_SETPOINT_ENTITY, self._config_entry.data[CONF_SETPOINT_ENTITY]),
-            CONF_OUTPUT_ENTITY: o.get(CONF_OUTPUT_ENTITY, self._config_entry.data[CONF_OUTPUT_ENTITY]),
-            CONF_GRID_POWER_ENTITY: o.get(CONF_GRID_POWER_ENTITY, self._config_entry.data[CONF_GRID_POWER_ENTITY]),
+            CONF_PROCESS_VALUE_ENTITY: o.get(
+                CONF_PROCESS_VALUE_ENTITY, self._config_entry.data.get(CONF_PROCESS_VALUE_ENTITY, "")
+            ),
+            CONF_SETPOINT_ENTITY: o.get(
+                CONF_SETPOINT_ENTITY, self._config_entry.data.get(CONF_SETPOINT_ENTITY, "")
+            ),
+            CONF_OUTPUT_ENTITY: o.get(CONF_OUTPUT_ENTITY, self._config_entry.data.get(CONF_OUTPUT_ENTITY, "")),
+            CONF_GRID_POWER_ENTITY: o.get(
+                CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY, "")
+            ),
             CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
             CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
             CONF_GRID_POWER_INVERT: o.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),

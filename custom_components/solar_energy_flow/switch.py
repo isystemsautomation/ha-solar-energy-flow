@@ -8,13 +8,21 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ENABLED, DEFAULT_ENABLED, DOMAIN
+from .const import (
+    CONF_ENABLED,
+    CONF_GRID_LIMITER_ENABLED,
+    DEFAULT_ENABLED,
+    DEFAULT_GRID_LIMITER_ENABLED,
+    DOMAIN,
+)
 from .coordinator import SolarEnergyFlowCoordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([SolarEnergyFlowEnabledSwitch(coordinator, entry)])
+    async_add_entities(
+        [SolarEnergyFlowEnabledSwitch(coordinator, entry), SolarEnergyFlowGridLimiterSwitch(coordinator, entry)]
+    )
 
 
 class SolarEnergyFlowEnabledSwitch(CoordinatorEntity, SwitchEntity):
@@ -46,6 +54,40 @@ class SolarEnergyFlowEnabledSwitch(CoordinatorEntity, SwitchEntity):
     async def _async_update_enabled(self, enabled: bool) -> None:
         options = dict(self._entry.options)
         options[CONF_ENABLED] = enabled
+
+        self.hass.config_entries.async_update_entry(self._entry, options=options)
+        await self.coordinator.async_request_refresh()
+
+
+class SolarEnergyFlowGridLimiterSwitch(CoordinatorEntity, SwitchEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Solar Energy Flow Grid Limiter Enabled"
+
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_grid_limiter"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer="Solar Energy Flow",
+            model="PID Controller",
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._entry.options.get(CONF_GRID_LIMITER_ENABLED, DEFAULT_GRID_LIMITER_ENABLED))
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._async_update_state(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._async_update_state(False)
+
+    async def _async_update_state(self, enabled: bool) -> None:
+        options = dict(self._entry.options)
+        options[CONF_GRID_LIMITER_ENABLED] = enabled
+        options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
 
         self.hass.config_entries.async_update_entry(self._entry, options=options)
         await self.coordinator.async_request_refresh()

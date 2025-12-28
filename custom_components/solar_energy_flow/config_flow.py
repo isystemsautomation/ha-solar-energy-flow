@@ -9,6 +9,7 @@ from .const import (
     CONF_PROCESS_VALUE_ENTITY,
     CONF_SETPOINT_ENTITY,
     CONF_OUTPUT_ENTITY,
+    CONF_GRID_POWER_ENTITY,
     CONF_ENABLED,
     CONF_KP,
     CONF_KI,
@@ -25,10 +26,26 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     CONF_INVERT_PV,
     CONF_INVERT_SP,
+    CONF_GRID_POWER_INVERT,
     CONF_PID_MODE,
+    CONF_GRID_LIMITER_ENABLED,
+    CONF_GRID_LIMITER_TYPE,
+    CONF_GRID_LIMITER_LIMIT_W,
+    CONF_GRID_LIMITER_DEADBAND_W,
+    CONF_SETPOINT_SOURCE,
+    CONF_GRID_TARGET_W,
+    CONF_PID_DEADBAND,
     DEFAULT_INVERT_PV,
     DEFAULT_INVERT_SP,
+    DEFAULT_GRID_POWER_INVERT,
     DEFAULT_PID_MODE,
+    DEFAULT_GRID_LIMITER_ENABLED,
+    DEFAULT_GRID_LIMITER_TYPE,
+    DEFAULT_GRID_LIMITER_LIMIT_W,
+    DEFAULT_GRID_LIMITER_DEADBAND_W,
+    DEFAULT_SETPOINT_SOURCE,
+    DEFAULT_GRID_TARGET_W,
+    DEFAULT_PID_DEADBAND,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
 )
@@ -51,6 +68,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PROCESS_VALUE_ENTITY): str,
                 vol.Required(CONF_SETPOINT_ENTITY): str,
                 vol.Required(CONF_OUTPUT_ENTITY): str,
+                vol.Required(CONF_GRID_POWER_ENTITY): str,
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -88,8 +106,13 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): str,
                 vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): str,
                 vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): str,
+                vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): str,
                 vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
                 vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
+                vol.Optional(
+                    CONF_GRID_POWER_INVERT,
+                    default=defaults.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
+                ): bool,
                 vol.Optional(
                     CONF_PID_MODE,
                     default=defaults.get(CONF_PID_MODE, DEFAULT_PID_MODE),
@@ -113,14 +136,28 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_KD: o.get(CONF_KD, DEFAULT_KD),
             CONF_MIN_OUTPUT: o.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT),
             CONF_MAX_OUTPUT: o.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT),
+            CONF_GRID_LIMITER_ENABLED: o.get(CONF_GRID_LIMITER_ENABLED, DEFAULT_GRID_LIMITER_ENABLED),
+            CONF_GRID_LIMITER_TYPE: o.get(CONF_GRID_LIMITER_TYPE, DEFAULT_GRID_LIMITER_TYPE),
+            CONF_GRID_LIMITER_LIMIT_W: o.get(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W),
+            CONF_GRID_LIMITER_DEADBAND_W: o.get(
+                CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W
+            ),
+            CONF_SETPOINT_SOURCE: o.get(CONF_SETPOINT_SOURCE, DEFAULT_SETPOINT_SOURCE),
+            CONF_GRID_TARGET_W: o.get(CONF_GRID_TARGET_W, DEFAULT_GRID_TARGET_W),
+            CONF_PID_DEADBAND: o.get(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND),
+            CONF_GRID_POWER_ENTITY: o.get(
+                CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY)
+            ),
         }
 
         defaults = {
             CONF_PROCESS_VALUE_ENTITY: o.get(CONF_PROCESS_VALUE_ENTITY, self._config_entry.data[CONF_PROCESS_VALUE_ENTITY]),
             CONF_SETPOINT_ENTITY: o.get(CONF_SETPOINT_ENTITY, self._config_entry.data[CONF_SETPOINT_ENTITY]),
             CONF_OUTPUT_ENTITY: o.get(CONF_OUTPUT_ENTITY, self._config_entry.data[CONF_OUTPUT_ENTITY]),
+            CONF_GRID_POWER_ENTITY: o.get(CONF_GRID_POWER_ENTITY, self._config_entry.data[CONF_GRID_POWER_ENTITY]),
             CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
             CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
+            CONF_GRID_POWER_INVERT: o.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
             CONF_PID_MODE: self._normalize_pid_mode(o.get(CONF_PID_MODE)),
             CONF_UPDATE_INTERVAL: self._coerce_int(
                 o.get(CONF_UPDATE_INTERVAL),
@@ -134,8 +171,10 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_PROCESS_VALUE_ENTITY: user_input.get(CONF_PROCESS_VALUE_ENTITY, defaults[CONF_PROCESS_VALUE_ENTITY]),
                 CONF_SETPOINT_ENTITY: user_input.get(CONF_SETPOINT_ENTITY, defaults[CONF_SETPOINT_ENTITY]),
                 CONF_OUTPUT_ENTITY: user_input.get(CONF_OUTPUT_ENTITY, defaults[CONF_OUTPUT_ENTITY]),
+                CONF_GRID_POWER_ENTITY: user_input.get(CONF_GRID_POWER_ENTITY, defaults[CONF_GRID_POWER_ENTITY]),
                 CONF_INVERT_PV: user_input.get(CONF_INVERT_PV, defaults[CONF_INVERT_PV]),
                 CONF_INVERT_SP: user_input.get(CONF_INVERT_SP, defaults[CONF_INVERT_SP]),
+                CONF_GRID_POWER_INVERT: user_input.get(CONF_GRID_POWER_INVERT, defaults[CONF_GRID_POWER_INVERT]),
                 CONF_PID_MODE: user_input.get(CONF_PID_MODE, defaults[CONF_PID_MODE]),
                 CONF_UPDATE_INTERVAL: self._coerce_int(
                     user_input.get(CONF_UPDATE_INTERVAL),

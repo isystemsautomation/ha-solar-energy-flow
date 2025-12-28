@@ -3,6 +3,7 @@ from __future__ import annotations
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -17,6 +18,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             SolarEnergyFlowOutputSensor(coordinator, entry),
             SolarEnergyFlowErrorSensor(coordinator, entry),
             SolarEnergyFlowStatusSensor(coordinator, entry),
+            SolarEnergyFlowLimiterStateSensor(coordinator, entry),
         ]
     )
 
@@ -66,3 +68,15 @@ class SolarEnergyFlowStatusSensor(_BaseFlowSensor):
     @property
     def native_value(self):
         return self.coordinator.data.status
+
+
+class SolarEnergyFlowLimiterStateSensor(_BaseFlowSensor):
+    _attr_icon = "mdi:flash-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "Solar Energy Flow Limiter State", "limiter_state")
+
+    @property
+    def native_value(self):
+        return getattr(self.coordinator.data, "limiter_state", None)

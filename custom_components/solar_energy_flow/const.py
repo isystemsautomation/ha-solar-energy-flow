@@ -3,6 +3,7 @@ DOMAIN = "solar_energy_flow"
 CONF_PROCESS_VALUE_ENTITY = "process_value_entity"
 CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_OUTPUT_ENTITY = "output_entity"
+CONF_GRID_POWER_ENTITY = "grid_power_entity"
 CONF_NAME = "name"
 
 # Options (PID tuning)
@@ -15,10 +16,28 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_ENABLED = "enabled"
 CONF_INVERT_PV = "invert_pv"
 CONF_INVERT_SP = "invert_sp"
+CONF_GRID_POWER_INVERT = "grid_power_invert"
 CONF_PID_MODE = "pid_mode"
+CONF_GRID_LIMITER_ENABLED = "grid_limiter_enabled"
+CONF_GRID_LIMITER_TYPE = "grid_limiter_type"
+CONF_GRID_LIMITER_LIMIT_W = "grid_limiter_limit_w"
+CONF_GRID_LIMITER_DEADBAND_W = "grid_limiter_deadband_w"
+CONF_SETPOINT_SOURCE = "setpoint_source"
+CONF_GRID_TARGET_W = "grid_target_w"
+CONF_PID_DEADBAND = "pid_deadband"
 
 PID_MODE_DIRECT = "direct"
 PID_MODE_REVERSE = "reverse"
+
+GRID_LIMITER_TYPE_IMPORT = "import"
+GRID_LIMITER_TYPE_EXPORT = "export"
+
+SETPOINT_SOURCE_MANUAL = "manual"
+SETPOINT_SOURCE_GRID_TARGET = "grid_target"
+
+GRID_LIMITER_STATE_NORMAL = "normal"
+GRID_LIMITER_STATE_LIMITING_IMPORT = "limiting_import"
+GRID_LIMITER_STATE_LIMITING_EXPORT = "limiting_export"
 
 DEFAULT_KP = 1.0
 DEFAULT_KI = 0.1
@@ -29,6 +48,14 @@ DEFAULT_UPDATE_INTERVAL = 10
 DEFAULT_ENABLED = True
 DEFAULT_INVERT_PV = False
 DEFAULT_INVERT_SP = False
+DEFAULT_GRID_POWER_INVERT = False
 DEFAULT_PID_MODE = PID_MODE_DIRECT
+DEFAULT_GRID_LIMITER_ENABLED = False
+DEFAULT_GRID_LIMITER_TYPE = GRID_LIMITER_TYPE_IMPORT
+DEFAULT_GRID_LIMITER_LIMIT_W = 1000.0
+DEFAULT_GRID_LIMITER_DEADBAND_W = 50.0
+DEFAULT_SETPOINT_SOURCE = SETPOINT_SOURCE_MANUAL
+DEFAULT_GRID_TARGET_W = 0.0
+DEFAULT_PID_DEADBAND = 0.0
 
-PLATFORMS = ["sensor", "switch", "number"]
+PLATFORMS = ["sensor", "switch", "number", "select"]

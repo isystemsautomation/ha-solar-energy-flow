@@ -8,7 +8,8 @@
           "name": "Name",
           "process_value_entity": "Process value sensor (PV)",
           "setpoint_entity": "Setpoint entity (target)",
-          "output_entity": "Output control entity (actuator)"
+          "output_entity": "Output control entity (actuator)",
+          "grid_power_entity": "Grid power sensor (signed import/export)"
         }
       }
     }
@@ -22,8 +23,10 @@
           "process_value_entity": "Process value sensor (PV)",
           "setpoint_entity": "Setpoint entity (target)",
           "output_entity": "Output control entity (actuator)",
+          "grid_power_entity": "Grid power sensor (signed import/export)",
           "invert_pv": "Invert PV (process value sign)",
           "invert_sp": "Invert SP (setpoint sign)",
+          "grid_power_invert": "Invert grid power sign",
           "pid_mode": "PID mode",
           "update_interval": "Update interval (seconds)"
         },

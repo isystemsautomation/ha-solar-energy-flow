@@ -17,8 +17,11 @@
     "step": {
       "init": {
         "title": "PID settings",
-        "description": "Tune the PID and control limits.",
+        "description": "Tune the PID, control limits, and linked entities.",
         "data": {
+          "process_value_entity": "Process value sensor (PV)",
+          "setpoint_entity": "Setpoint entity (target)",
+          "output_entity": "Output control entity (actuator)",
           "enabled": "Enabled",
           "kp": "Proportional gain (Kp)",
           "ki": "Integral gain (Ki)",

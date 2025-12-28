@@ -78,6 +78,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
     def _build_schema(defaults: dict) -> vol.Schema:
         return vol.Schema(
             {
+                vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): str,
+                vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): str,
+                vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): str,
                 vol.Optional(CONF_ENABLED, default=defaults.get(CONF_ENABLED, DEFAULT_ENABLED)): bool,
                 vol.Optional(CONF_KP, default=defaults.get(CONF_KP, DEFAULT_KP)): vol.Coerce(float),
                 vol.Optional(CONF_KI, default=defaults.get(CONF_KI, DEFAULT_KI)): vol.Coerce(float),
@@ -96,6 +99,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         defaults = {
+            CONF_PROCESS_VALUE_ENTITY: o.get(CONF_PROCESS_VALUE_ENTITY, self._config_entry.data[CONF_PROCESS_VALUE_ENTITY]),
+            CONF_SETPOINT_ENTITY: o.get(CONF_SETPOINT_ENTITY, self._config_entry.data[CONF_SETPOINT_ENTITY]),
+            CONF_OUTPUT_ENTITY: o.get(CONF_OUTPUT_ENTITY, self._config_entry.data[CONF_OUTPUT_ENTITY]),
             CONF_ENABLED: o.get(CONF_ENABLED, DEFAULT_ENABLED),
             CONF_KP: self._coerce_float(o.get(CONF_KP), DEFAULT_KP),
             CONF_KI: self._coerce_float(o.get(CONF_KI), DEFAULT_KI),
@@ -114,6 +120,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
 
         if user_input is not None:
             cleaned = {
+                CONF_PROCESS_VALUE_ENTITY: user_input.get(CONF_PROCESS_VALUE_ENTITY, defaults[CONF_PROCESS_VALUE_ENTITY]),
+                CONF_SETPOINT_ENTITY: user_input.get(CONF_SETPOINT_ENTITY, defaults[CONF_SETPOINT_ENTITY]),
+                CONF_OUTPUT_ENTITY: user_input.get(CONF_OUTPUT_ENTITY, defaults[CONF_OUTPUT_ENTITY]),
                 CONF_ENABLED: user_input.get(CONF_ENABLED, DEFAULT_ENABLED),
                 CONF_KP: self._coerce_float(user_input.get(CONF_KP), defaults[CONF_KP]),
                 CONF_KI: self._coerce_float(user_input.get(CONF_KI), defaults[CONF_KI]),

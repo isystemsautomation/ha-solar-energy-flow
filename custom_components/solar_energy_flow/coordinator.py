@@ -109,6 +109,10 @@ async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> None
     _LOGGER.warning("Unsupported output entity domain '%s' for %s. Use number.* or input_number.*", domain, entity_id)
 
 
+def _get_entity_id(entry: ConfigEntry, key: str) -> str | None:
+    return entry.options.get(key) or entry.data.get(key)
+
+
 class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
@@ -147,12 +151,12 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._refresh_pid_config()
 
         enabled = self.entry.options.get(CONF_ENABLED, DEFAULT_ENABLED)
-        pv_ent = self.entry.data[CONF_PROCESS_VALUE_ENTITY]
-        sp_ent = self.entry.data[CONF_SETPOINT_ENTITY]
-        out_ent = self.entry.data[CONF_OUTPUT_ENTITY]
+        pv_ent = _get_entity_id(self.entry, CONF_PROCESS_VALUE_ENTITY)
+        sp_ent = _get_entity_id(self.entry, CONF_SETPOINT_ENTITY)
+        out_ent = _get_entity_id(self.entry, CONF_OUTPUT_ENTITY)
 
-        pv = _state_to_float(self.hass.states.get(pv_ent))
-        sp = _state_to_float(self.hass.states.get(sp_ent))
+        pv = _state_to_float(self.hass.states.get(pv_ent)) if pv_ent else None
+        sp = _state_to_float(self.hass.states.get(sp_ent)) if sp_ent else None
 
         if not enabled:
             self.pid.reset()
@@ -164,6 +168,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         out, err = self.pid.step(pv=pv, sp=sp)
 
-        await _set_output(self.hass, out_ent, out)
+        if out_ent:
+            await _set_output(self.hass, out_ent, out)
+        else:
+            _LOGGER.warning("No output entity configured.")
 
         return FlowState(pv=pv, sp=sp, out=out, error=err, enabled=True, status="running")

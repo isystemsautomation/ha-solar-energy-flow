@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, PLATFORMS, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
-from .coordinator import SolarEnergyFlowCoordinator
+from .coordinator import SolarEnergyFlowCoordinator, _get_update_interval_seconds
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -28,7 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+    interval = _get_update_interval_seconds(entry)
 
     coordinator.update_interval = timedelta(seconds=interval)
     await coordinator.async_request_refresh()

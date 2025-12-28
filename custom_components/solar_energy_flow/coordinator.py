@@ -113,9 +113,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         sp = _state_to_float(self.hass.states.get(sp_ent))
 
         if not enabled:
+            self.pid.reset()
             return FlowState(pv=pv, sp=sp, out=None, error=None, enabled=False, status="disabled")
 
         if pv is None or sp is None:
+            self.pid.reset()
             return FlowState(pv=pv, sp=sp, out=None, error=None, enabled=True, status="missing_input")
 
         out, err = self.pid.step(pv=pv, sp=sp)

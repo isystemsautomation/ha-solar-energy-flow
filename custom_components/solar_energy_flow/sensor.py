@@ -5,8 +5,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.device_registry import DeviceInfo
 
-from .const import DOMAIN
+from .const import DOMAIN, DEFAULT_NAME
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -26,6 +27,13 @@ class _BaseFlowSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._attr_name = name
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{unique_suffix}"
+        device_name = entry.title or DEFAULT_NAME
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=device_name,
+            manufacturer="Solar Energy Flow",
+            model="PID Controller",
+        )
 
 
 class SolarEnergyFlowOutputSensor(_BaseFlowSensor):

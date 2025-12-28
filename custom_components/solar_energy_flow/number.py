@@ -15,12 +15,20 @@ from .const import (
     CONF_KP,
     CONF_MAX_OUTPUT,
     CONF_MIN_OUTPUT,
+    CONF_GRID_LIMITER_LIMIT_W,
+    CONF_GRID_LIMITER_DEADBAND_W,
+    CONF_GRID_TARGET_W,
+    CONF_PID_DEADBAND,
     DEFAULT_ENABLED,
     DEFAULT_KD,
     DEFAULT_KI,
     DEFAULT_KP,
     DEFAULT_MAX_OUTPUT,
     DEFAULT_MIN_OUTPUT,
+    DEFAULT_GRID_LIMITER_LIMIT_W,
+    DEFAULT_GRID_LIMITER_DEADBAND_W,
+    DEFAULT_GRID_TARGET_W,
+    DEFAULT_PID_DEADBAND,
     DOMAIN,
 )
 from .coordinator import SolarEnergyFlowCoordinator
@@ -30,19 +38,87 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities: list[NumberEntity] = [
-        SolarEnergyFlowNumber(coordinator, entry, CONF_KP, "Solar Energy Flow Kp", DEFAULT_KP, 0.001),
-        SolarEnergyFlowNumber(coordinator, entry, CONF_KI, "Solar Energy Flow Ki", DEFAULT_KI, 0.001),
-        SolarEnergyFlowNumber(coordinator, entry, CONF_KD, "Solar Energy Flow Kd", DEFAULT_KD, 0.001),
-        SolarEnergyFlowNumber(coordinator, entry, CONF_MIN_OUTPUT, "Solar Energy Flow Min Output", DEFAULT_MIN_OUTPUT, 1.0),
-        SolarEnergyFlowNumber(coordinator, entry, CONF_MAX_OUTPUT, "Solar Energy Flow Max Output", DEFAULT_MAX_OUTPUT, 1.0),
+        SolarEnergyFlowNumber(
+            coordinator, entry, CONF_KP, "Solar Energy Flow Kp", DEFAULT_KP, 0.001, None, None, EntityCategory.CONFIG
+        ),
+        SolarEnergyFlowNumber(
+            coordinator, entry, CONF_KI, "Solar Energy Flow Ki", DEFAULT_KI, 0.001, None, None, EntityCategory.CONFIG
+        ),
+        SolarEnergyFlowNumber(
+            coordinator, entry, CONF_KD, "Solar Energy Flow Kd", DEFAULT_KD, 0.001, None, None, EntityCategory.CONFIG
+        ),
+        SolarEnergyFlowNumber(
+            coordinator,
+            entry,
+            CONF_MIN_OUTPUT,
+            "Solar Energy Flow Min Output",
+            DEFAULT_MIN_OUTPUT,
+            1.0,
+            None,
+            None,
+            EntityCategory.CONFIG,
+        ),
+        SolarEnergyFlowNumber(
+            coordinator,
+            entry,
+            CONF_MAX_OUTPUT,
+            "Solar Energy Flow Max Output",
+            DEFAULT_MAX_OUTPUT,
+            1.0,
+            None,
+            None,
+            EntityCategory.CONFIG,
+        ),
+        SolarEnergyFlowNumber(
+            coordinator,
+            entry,
+            CONF_GRID_LIMITER_LIMIT_W,
+            "Solar Energy Flow Grid Limit",
+            DEFAULT_GRID_LIMITER_LIMIT_W,
+            10.0,
+            0.0,
+            20000.0,
+            None,
+        ),
+        SolarEnergyFlowNumber(
+            coordinator,
+            entry,
+            CONF_GRID_LIMITER_DEADBAND_W,
+            "Solar Energy Flow Grid Deadband",
+            DEFAULT_GRID_LIMITER_DEADBAND_W,
+            10.0,
+            0.0,
+            2000.0,
+            None,
+        ),
+        SolarEnergyFlowNumber(
+            coordinator,
+            entry,
+            CONF_GRID_TARGET_W,
+            "Solar Energy Flow Grid Target",
+            DEFAULT_GRID_TARGET_W,
+            10.0,
+            -5000.0,
+            5000.0,
+            None,
+        ),
+        SolarEnergyFlowNumber(
+            coordinator,
+            entry,
+            CONF_PID_DEADBAND,
+            "Solar Energy Flow PID Deadband",
+            DEFAULT_PID_DEADBAND,
+            1.0,
+            0.0,
+            2000.0,
+            None,
+        ),
     ]
 
     async_add_entities(entities)
 
 
 class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
-    _attr_entity_category = EntityCategory.CONFIG
-
     def __init__(
         self,
         coordinator: SolarEnergyFlowCoordinator,
@@ -51,6 +127,9 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
         name: str,
         default: float,
         step: float,
+        min_value: float | None,
+        max_value: float | None,
+        entity_category: EntityCategory | None,
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry
@@ -59,6 +138,9 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
         self._attr_name = name
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{option_key}"
         self._attr_native_step = step
+        self._attr_native_min_value = min_value
+        self._attr_native_max_value = max_value
+        self._attr_entity_category = entity_category
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
@@ -83,6 +165,10 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
         options.setdefault(CONF_KD, DEFAULT_KD)
         options.setdefault(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)
         options.setdefault(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
+        options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
+        options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
+        options.setdefault(CONF_GRID_TARGET_W, DEFAULT_GRID_TARGET_W)
+        options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
 
         options[self._option_key] = value
 

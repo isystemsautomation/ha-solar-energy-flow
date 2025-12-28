@@ -21,6 +21,7 @@ class PID:
         self._integral = 0.0
         self._prev_pv: float | None = None
         self._prev_t: float | None = None
+        self._prev_error: float | None = None
 
     def update_config(self, cfg: PIDConfig) -> None:
         self.cfg = cfg
@@ -29,6 +30,7 @@ class PID:
         self._integral = 0.0
         self._prev_pv = None
         self._prev_t = None
+        self._prev_error = None
 
     def step(self, pv: float, error: float) -> tuple[float, float]:
         """Return (output, error)."""
@@ -64,4 +66,16 @@ class PID:
 
         self._prev_pv = pv
         self._prev_t = now
+        self._prev_error = error
         return out, error
+
+    def apply_bumpless(self, current_output: float, pv: float, error: float) -> None:
+        d_term = 0.0
+        if self.cfg.ki != 0:
+            self._integral = (current_output - self.cfg.kp * error - d_term) / self.cfg.ki
+        else:
+            self._integral = 0.0
+        now = time.monotonic()
+        self._prev_pv = pv
+        self._prev_t = now
+        self._prev_error = error

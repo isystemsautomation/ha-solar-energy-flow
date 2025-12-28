@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, PLATFORMS
+from .const import DOMAIN, GRID_LIMITER_STATE_NORMAL, PLATFORMS
 from .coordinator import SolarEnergyFlowCoordinator, _get_update_interval_seconds
 
 
@@ -42,6 +42,8 @@ async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     coordinator.update_interval = timedelta(seconds=interval)
     coordinator.pid.reset()
+    coordinator._limiter_state = GRID_LIMITER_STATE_NORMAL  # noqa: SLF001
+    coordinator._last_output = None  # noqa: SLF001
     await coordinator.async_request_refresh()
 
 

@@ -41,6 +41,7 @@ async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     interval = _get_update_interval_seconds(entry)
 
     coordinator.update_interval = timedelta(seconds=interval)
+    coordinator.pid.reset()
     await coordinator.async_request_refresh()
 
 

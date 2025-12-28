@@ -27,6 +27,14 @@ from .const import (
     DEFAULT_MAX_OUTPUT,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_ENABLED,
+    CONF_INVERT_PV,
+    CONF_INVERT_SP,
+    CONF_PID_MODE,
+    DEFAULT_INVERT_PV,
+    DEFAULT_INVERT_SP,
+    DEFAULT_PID_MODE,
+    PID_MODE_DIRECT,
+    PID_MODE_REVERSE,
 )
 from .pid import PID, PIDConfig
 
@@ -93,6 +101,14 @@ def _get_pid_limits(entry: ConfigEntry) -> tuple[float, float]:
     return min_output, max_output
 
 
+def _get_pid_mode(entry: ConfigEntry) -> str:
+    mode = entry.options.get(CONF_PID_MODE, DEFAULT_PID_MODE)
+    if mode in (PID_MODE_DIRECT, PID_MODE_REVERSE):
+        return mode
+    _LOGGER.warning("Invalid PID mode '%s'; falling back to '%s'", mode, DEFAULT_PID_MODE)
+    return DEFAULT_PID_MODE
+
+
 async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> None:
     domain = entity_id.split(".", 1)[0]
 
@@ -151,12 +167,22 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._refresh_pid_config()
 
         enabled = self.entry.options.get(CONF_ENABLED, DEFAULT_ENABLED)
+        invert_pv = self.entry.options.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)
+        invert_sp = self.entry.options.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)
+        pid_mode = _get_pid_mode(self.entry)
+
         pv_ent = _get_entity_id(self.entry, CONF_PROCESS_VALUE_ENTITY)
         sp_ent = _get_entity_id(self.entry, CONF_SETPOINT_ENTITY)
         out_ent = _get_entity_id(self.entry, CONF_OUTPUT_ENTITY)
 
         pv = _state_to_float(self.hass.states.get(pv_ent)) if pv_ent else None
         sp = _state_to_float(self.hass.states.get(sp_ent)) if sp_ent else None
+
+        if pv is not None and invert_pv:
+            pv = -pv
+
+        if sp is not None and invert_sp:
+            sp = -sp
 
         if not enabled:
             self.pid.reset()
@@ -166,7 +192,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self.pid.reset()
             return FlowState(pv=pv, sp=sp, out=None, error=None, enabled=True, status="missing_input")
 
-        out, err = self.pid.step(pv=pv, sp=sp)
+        error = sp - pv
+        if pid_mode == PID_MODE_REVERSE:
+            error = -error
+
+        out, err = self.pid.step(pv=pv, error=error)
 
         if out_ent:
             await _set_output(self.hass, out_ent, out)

@@ -23,6 +23,14 @@ from .const import (
     DEFAULT_MIN_OUTPUT,
     DEFAULT_MAX_OUTPUT,
     DEFAULT_UPDATE_INTERVAL,
+    CONF_INVERT_PV,
+    CONF_INVERT_SP,
+    CONF_PID_MODE,
+    DEFAULT_INVERT_PV,
+    DEFAULT_INVERT_SP,
+    DEFAULT_PID_MODE,
+    PID_MODE_DIRECT,
+    PID_MODE_REVERSE,
 )
 
 
@@ -75,6 +83,12 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         return max(min_value, int_val)
 
     @staticmethod
+    def _normalize_pid_mode(value: str | None) -> str:
+        if value in (PID_MODE_DIRECT, PID_MODE_REVERSE):
+            return value
+        return DEFAULT_PID_MODE
+
+    @staticmethod
     def _build_schema(defaults: dict) -> vol.Schema:
         return vol.Schema(
             {
@@ -87,6 +101,12 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(CONF_KD, default=defaults.get(CONF_KD, DEFAULT_KD)): vol.Coerce(float),
                 vol.Optional(CONF_MIN_OUTPUT, default=defaults.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)): vol.Coerce(float),
                 vol.Optional(CONF_MAX_OUTPUT, default=defaults.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)): vol.Coerce(float),
+                vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
+                vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
+                vol.Optional(
+                    CONF_PID_MODE,
+                    default=defaults.get(CONF_PID_MODE, DEFAULT_PID_MODE),
+                ): vol.In([PID_MODE_DIRECT, PID_MODE_REVERSE]),
                 vol.Optional(
                     CONF_UPDATE_INTERVAL,
                     default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
@@ -108,6 +128,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_KD: self._coerce_float(o.get(CONF_KD), DEFAULT_KD),
             CONF_MIN_OUTPUT: self._coerce_float(o.get(CONF_MIN_OUTPUT), DEFAULT_MIN_OUTPUT),
             CONF_MAX_OUTPUT: self._coerce_float(o.get(CONF_MAX_OUTPUT), DEFAULT_MAX_OUTPUT),
+            CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
+            CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
+            CONF_PID_MODE: self._normalize_pid_mode(o.get(CONF_PID_MODE)),
             CONF_UPDATE_INTERVAL: self._coerce_int(
                 o.get(CONF_UPDATE_INTERVAL),
                 DEFAULT_UPDATE_INTERVAL,
@@ -129,6 +152,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_KD: self._coerce_float(user_input.get(CONF_KD), defaults[CONF_KD]),
                 CONF_MIN_OUTPUT: self._coerce_float(user_input.get(CONF_MIN_OUTPUT), defaults[CONF_MIN_OUTPUT]),
                 CONF_MAX_OUTPUT: self._coerce_float(user_input.get(CONF_MAX_OUTPUT), defaults[CONF_MAX_OUTPUT]),
+                CONF_INVERT_PV: user_input.get(CONF_INVERT_PV, defaults[CONF_INVERT_PV]),
+                CONF_INVERT_SP: user_input.get(CONF_INVERT_SP, defaults[CONF_INVERT_SP]),
+                CONF_PID_MODE: user_input.get(CONF_PID_MODE, defaults[CONF_PID_MODE]),
                 CONF_UPDATE_INTERVAL: self._coerce_int(
                     user_input.get(CONF_UPDATE_INTERVAL),
                     defaults[CONF_UPDATE_INTERVAL],

@@ -30,15 +30,13 @@ class PID:
         self._prev_pv = None
         self._prev_t = None
 
-    def step(self, pv: float, sp: float) -> tuple[float, float]:
+    def step(self, pv: float, error: float) -> tuple[float, float]:
         """Return (output, error)."""
         now = time.monotonic()
         if self._prev_t is None:
             dt = 0.0
         else:
             dt = max(1e-6, now - self._prev_t)
-
-        error = sp - pv
 
         # Integral
         if dt > 0:

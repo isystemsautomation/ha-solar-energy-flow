@@ -294,6 +294,9 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
         data = getattr(self.coordinator, "data", None)
         if data and getattr(data, "runtime_mode", None):
             return data.runtime_mode
+        runtime_mode = getattr(self.coordinator, "_runtime_mode", None)
+        if runtime_mode:
+            return runtime_mode
         return self._entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
 
     def _mirror_value(self) -> float:
@@ -319,7 +322,7 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
         runtime_mode = self._runtime_mode()
         allowed = False
         if self._option_key == CONF_MANUAL_SP_VALUE:
-            allowed = runtime_mode in (RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD)
+            allowed = runtime_mode == RUNTIME_MODE_MANUAL_SP
         elif self._option_key == CONF_MANUAL_OUT_VALUE:
             allowed = runtime_mode == RUNTIME_MODE_MANUAL_OUT
 
@@ -339,6 +342,8 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             self.coordinator._manual_sp_value = value
         else:
             self.coordinator._manual_out_value = value
+            if runtime_mode == RUNTIME_MODE_MANUAL_OUT:
+                self.coordinator._last_output = value
 
         self.coordinator.apply_options(options)
         self.hass.config_entries.async_update_entry(self._entry, options=options)

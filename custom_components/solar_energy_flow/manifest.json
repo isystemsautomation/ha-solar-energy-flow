@@ -7,5 +7,5 @@
   "requirements": [],
   "codeowners": ["@isystemsautomation"],
   "config_flow": true,
-  "integration_type": "service"
+  "integration_type": "hub"
 }

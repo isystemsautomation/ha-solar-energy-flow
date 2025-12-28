@@ -61,18 +61,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
-    """Options flow (PID tuning) shown when user clicks Configure."""
+    """Options flow for wiring and PID behavior shown when user clicks Configure."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         # config_entry is read-only in your HA version
         self._config_entry = config_entry
-
-    @staticmethod
-    def _coerce_float(value, default):
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
 
     @staticmethod
     def _coerce_int(value, default, min_value=1):
@@ -95,12 +88,6 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): str,
                 vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): str,
                 vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): str,
-                vol.Optional(CONF_ENABLED, default=defaults.get(CONF_ENABLED, DEFAULT_ENABLED)): bool,
-                vol.Optional(CONF_KP, default=defaults.get(CONF_KP, DEFAULT_KP)): vol.Coerce(float),
-                vol.Optional(CONF_KI, default=defaults.get(CONF_KI, DEFAULT_KI)): vol.Coerce(float),
-                vol.Optional(CONF_KD, default=defaults.get(CONF_KD, DEFAULT_KD)): vol.Coerce(float),
-                vol.Optional(CONF_MIN_OUTPUT, default=defaults.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)): vol.Coerce(float),
-                vol.Optional(CONF_MAX_OUTPUT, default=defaults.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)): vol.Coerce(float),
                 vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
                 vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
                 vol.Optional(
@@ -118,16 +105,20 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         o = self._config_entry.options
         errors: dict[str, str] = {}
 
+        # Keep previously stored tuning values even though they are no longer exposed in the form.
+        preserved = {
+            CONF_ENABLED: o.get(CONF_ENABLED, DEFAULT_ENABLED),
+            CONF_KP: o.get(CONF_KP, DEFAULT_KP),
+            CONF_KI: o.get(CONF_KI, DEFAULT_KI),
+            CONF_KD: o.get(CONF_KD, DEFAULT_KD),
+            CONF_MIN_OUTPUT: o.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT),
+            CONF_MAX_OUTPUT: o.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT),
+        }
+
         defaults = {
             CONF_PROCESS_VALUE_ENTITY: o.get(CONF_PROCESS_VALUE_ENTITY, self._config_entry.data[CONF_PROCESS_VALUE_ENTITY]),
             CONF_SETPOINT_ENTITY: o.get(CONF_SETPOINT_ENTITY, self._config_entry.data[CONF_SETPOINT_ENTITY]),
             CONF_OUTPUT_ENTITY: o.get(CONF_OUTPUT_ENTITY, self._config_entry.data[CONF_OUTPUT_ENTITY]),
-            CONF_ENABLED: o.get(CONF_ENABLED, DEFAULT_ENABLED),
-            CONF_KP: self._coerce_float(o.get(CONF_KP), DEFAULT_KP),
-            CONF_KI: self._coerce_float(o.get(CONF_KI), DEFAULT_KI),
-            CONF_KD: self._coerce_float(o.get(CONF_KD), DEFAULT_KD),
-            CONF_MIN_OUTPUT: self._coerce_float(o.get(CONF_MIN_OUTPUT), DEFAULT_MIN_OUTPUT),
-            CONF_MAX_OUTPUT: self._coerce_float(o.get(CONF_MAX_OUTPUT), DEFAULT_MAX_OUTPUT),
             CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
             CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
             CONF_PID_MODE: self._normalize_pid_mode(o.get(CONF_PID_MODE)),
@@ -138,20 +129,11 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             ),
         }
 
-        if defaults[CONF_MAX_OUTPUT] < defaults[CONF_MIN_OUTPUT]:
-            defaults[CONF_MAX_OUTPUT] = defaults[CONF_MIN_OUTPUT]
-
         if user_input is not None:
             cleaned = {
                 CONF_PROCESS_VALUE_ENTITY: user_input.get(CONF_PROCESS_VALUE_ENTITY, defaults[CONF_PROCESS_VALUE_ENTITY]),
                 CONF_SETPOINT_ENTITY: user_input.get(CONF_SETPOINT_ENTITY, defaults[CONF_SETPOINT_ENTITY]),
                 CONF_OUTPUT_ENTITY: user_input.get(CONF_OUTPUT_ENTITY, defaults[CONF_OUTPUT_ENTITY]),
-                CONF_ENABLED: user_input.get(CONF_ENABLED, DEFAULT_ENABLED),
-                CONF_KP: self._coerce_float(user_input.get(CONF_KP), defaults[CONF_KP]),
-                CONF_KI: self._coerce_float(user_input.get(CONF_KI), defaults[CONF_KI]),
-                CONF_KD: self._coerce_float(user_input.get(CONF_KD), defaults[CONF_KD]),
-                CONF_MIN_OUTPUT: self._coerce_float(user_input.get(CONF_MIN_OUTPUT), defaults[CONF_MIN_OUTPUT]),
-                CONF_MAX_OUTPUT: self._coerce_float(user_input.get(CONF_MAX_OUTPUT), defaults[CONF_MAX_OUTPUT]),
                 CONF_INVERT_PV: user_input.get(CONF_INVERT_PV, defaults[CONF_INVERT_PV]),
                 CONF_INVERT_SP: user_input.get(CONF_INVERT_SP, defaults[CONF_INVERT_SP]),
                 CONF_PID_MODE: user_input.get(CONF_PID_MODE, defaults[CONF_PID_MODE]),
@@ -162,10 +144,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 ),
             }
 
-            if cleaned[CONF_MIN_OUTPUT] > cleaned[CONF_MAX_OUTPUT]:
-                errors["base"] = "min_output_gt_max"
-            else:
-                return self.async_create_entry(title="", data=cleaned)
+            return self.async_create_entry(title="", data={**preserved, **cleaned})
 
             defaults = cleaned
 

@@ -101,6 +101,13 @@ def _get_pid_limits(entry: ConfigEntry) -> tuple[float, float]:
     return min_output, max_output
 
 
+def _coerce_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _get_pid_mode(entry: ConfigEntry) -> str:
     mode = entry.options.get(CONF_PID_MODE, DEFAULT_PID_MODE)
     if mode in (PID_MODE_DIRECT, PID_MODE_REVERSE):
@@ -144,9 +151,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         min_output, max_output = _get_pid_limits(entry)
         cfg = PIDConfig(
-            kp=entry.options.get(CONF_KP, DEFAULT_KP),
-            ki=entry.options.get(CONF_KI, DEFAULT_KI),
-            kd=entry.options.get(CONF_KD, DEFAULT_KD),
+            kp=_coerce_float(entry.options.get(CONF_KP, DEFAULT_KP), DEFAULT_KP),
+            ki=_coerce_float(entry.options.get(CONF_KI, DEFAULT_KI), DEFAULT_KI),
+            kd=_coerce_float(entry.options.get(CONF_KD, DEFAULT_KD), DEFAULT_KD),
             min_output=min_output,
             max_output=max_output,
         )
@@ -155,9 +162,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
     def _refresh_pid_config(self) -> None:
         min_output, max_output = _get_pid_limits(self.entry)
         cfg = PIDConfig(
-            kp=self.entry.options.get(CONF_KP, DEFAULT_KP),
-            ki=self.entry.options.get(CONF_KI, DEFAULT_KI),
-            kd=self.entry.options.get(CONF_KD, DEFAULT_KD),
+            kp=_coerce_float(self.entry.options.get(CONF_KP, DEFAULT_KP), DEFAULT_KP),
+            ki=_coerce_float(self.entry.options.get(CONF_KI, DEFAULT_KI), DEFAULT_KI),
+            kd=_coerce_float(self.entry.options.get(CONF_KD, DEFAULT_KD), DEFAULT_KD),
             min_output=min_output,
             max_output=max_output,
         )

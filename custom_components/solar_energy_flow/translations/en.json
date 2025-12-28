@@ -17,7 +17,7 @@
     "step": {
       "init": {
         "title": "PID settings",
-        "description": "Tune the PID, control limits, and linked entities.",
+        "description": "Configure wiring, inversion, mode, and update interval.",
         "data": {
           "process_value_entity": "Process value sensor (PV)",
           "setpoint_entity": "Setpoint entity (target)",
@@ -25,12 +25,6 @@
           "invert_pv": "Invert PV (process value sign)",
           "invert_sp": "Invert SP (setpoint sign)",
           "pid_mode": "PID mode",
-          "enabled": "Enabled",
-          "kp": "Proportional gain (Kp)",
-          "ki": "Integral gain (Ki)",
-          "kd": "Derivative gain (Kd)",
-          "min_output": "Minimum output",
-          "max_output": "Maximum output",
           "update_interval": "Update interval (seconds)"
         },
         "data_description": {
@@ -43,8 +37,6 @@
         }
       }
     },
-    "error": {
-      "min_output_gt_max": "Minimum output must be less than or equal to maximum output."
-    }
+    "error": {}
   }
 }

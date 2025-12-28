@@ -61,6 +61,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         o = self._config_entry.options
+        default_interval = max(o.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL), 1)
 
         schema = vol.Schema(
             {
@@ -70,7 +71,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(CONF_KD, default=o.get(CONF_KD, DEFAULT_KD)): vol.Coerce(float),
                 vol.Optional(CONF_MIN_OUTPUT, default=o.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)): vol.Coerce(float),
                 vol.Optional(CONF_MAX_OUTPUT, default=o.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)): vol.Coerce(float),
-                vol.Optional(CONF_UPDATE_INTERVAL, default=o.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): vol.Coerce(int),
+                vol.Optional(CONF_UPDATE_INTERVAL, default=default_interval): vol.All(vol.Coerce(int), vol.Range(min=1)),
             }
         )
 

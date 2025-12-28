@@ -16,7 +16,6 @@ from .const import (
     CONF_MIN_OUTPUT,
     CONF_MAX_OUTPUT,
     CONF_UPDATE_INTERVAL,
-    DEFAULT_NAME,
     DEFAULT_ENABLED,
     DEFAULT_KP,
     DEFAULT_KI,
@@ -32,6 +31,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         if user_input is not None:
+            unique_id = f"{user_input[CONF_PROCESS_VALUE_ENTITY]}::{user_input[CONF_SETPOINT_ENTITY]}::{user_input[CONF_OUTPUT_ENTITY]}"
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured()
             name = user_input.pop(CONF_NAME)
             return self.async_create_entry(title=name, data=user_input)
 

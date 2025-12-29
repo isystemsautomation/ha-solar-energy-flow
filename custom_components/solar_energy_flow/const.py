@@ -112,4 +112,4 @@ RUNTIME_MODE_MANUAL_SP = "MANUAL SP"
 RUNTIME_MODE_HOLD = "HOLD"
 RUNTIME_MODE_MANUAL_OUT = "MANUAL OUT"
 
-PLATFORMS = ["sensor", "switch", "number", "select"]
+PLATFORMS = ["sensor", "switch", "number", "select", "binary_sensor"]

@@ -31,10 +31,11 @@ from .const import (
 )
 from .consumer_bindings import ConsumerBinding, get_consumer_binding
 from .coordinator import SolarEnergyFlowCoordinator
+from .helpers import get_entry_coordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
     consumers = list(entry.options.get(CONF_CONSUMERS, []))
 
     entities: list[SwitchEntity] = [

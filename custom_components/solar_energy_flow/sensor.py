@@ -3,24 +3,42 @@ from __future__ import annotations
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import UnitOfPower, UnitOfTime
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_BATTERY_SOC_ENTITY,
+    CONF_CONSUMERS,
+    CONSUMER_DEVICE_SUFFIX,
+    CONSUMER_ID,
+    CONSUMER_MAX_POWER_W,
+    CONSUMER_MIN_POWER_W,
+    CONSUMER_NAME,
+    CONSUMER_TYPE,
+    CONSUMER_TYPE_CONTROLLED,
     DOMAIN,
     DIVIDER_DEVICE_SUFFIX,
     HUB_DEVICE_SUFFIX,
     PID_DEVICE_SUFFIX,
 )
 from .coordinator import SolarEnergyFlowCoordinator
+from .helpers import (
+    RUNTIME_FIELD_CMD_W,
+    RUNTIME_FIELD_START_TIMER_S,
+    RUNTIME_FIELD_STOP_TIMER_S,
+    consumer_runtime_updated_signal,
+    get_consumer_runtime,
+    get_entry_coordinator,
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
     entities: list[SensorEntity] = [
         SolarEnergyFlowEffectiveSPSensor(coordinator, entry),
         SolarEnergyFlowPVValueSensor(coordinator, entry),
@@ -41,6 +59,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         battery_soc_entity = entry.data.get(CONF_BATTERY_SOC_ENTITY)
     if battery_soc_entity:
         entities.append(BatterySOCSensor(entry, battery_soc_entity))
+
+    consumers = entry.options.get(CONF_CONSUMERS, [])
+    for consumer in consumers:
+        if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_CONTROLLED:
+            continue
+        entities.extend(
+            [
+                ConsumerCommandedPowerSensor(entry, consumer),
+                ConsumerStateSensor(entry, consumer),
+                ConsumerStartTimerSensor(entry, consumer),
+                ConsumerStopTimerSensor(entry, consumer),
+            ]
+        )
 
     async_add_entities(entities)
 
@@ -254,3 +285,90 @@ class BatterySOCSensor(SensorEntity):
     @property
     def native_value(self):
         return self._read_source_value()
+
+
+class _BaseConsumerRuntimeSensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: ConfigEntry, consumer: dict, name: str, unique_suffix: str) -> None:
+        self._entry = entry
+        self._consumer = consumer
+        self._consumer_id = consumer[CONSUMER_ID]
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{self._consumer_id}_{unique_suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
+            name=consumer.get(CONSUMER_NAME, "Consumer"),
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider Consumer",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                consumer_runtime_updated_signal(self._entry.entry_id),
+                self._handle_runtime_update,
+            )
+        )
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_runtime_update(self, consumer_id: str) -> None:
+        if consumer_id != self._consumer_id:
+            return
+        self.async_write_ha_state()
+
+    def _runtime(self) -> dict[str, float]:
+        return get_consumer_runtime(self.hass, self._entry.entry_id, self._consumer_id)
+
+
+class ConsumerCommandedPowerSensor(_BaseConsumerRuntimeSensor):
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(self, entry: ConfigEntry, consumer: dict) -> None:
+        super().__init__(entry, consumer, "Commanded power", "cmd_power")
+
+    @property
+    def native_value(self):
+        runtime = self._runtime()
+        return runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
+
+
+class ConsumerStateSensor(_BaseConsumerRuntimeSensor):
+    def __init__(self, entry: ConfigEntry, consumer: dict) -> None:
+        super().__init__(entry, consumer, "State", "state")
+
+    @property
+    def native_value(self):
+        runtime = self._runtime()
+        cmd_w = runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
+        return "OFF" if abs(cmd_w) < 1e-6 else "RUNNING"
+
+
+class ConsumerStartTimerSensor(_BaseConsumerRuntimeSensor):
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+
+    def __init__(self, entry: ConfigEntry, consumer: dict) -> None:
+        super().__init__(entry, consumer, "Start timer", "start_timer_s")
+
+    @property
+    def native_value(self):
+        runtime = self._runtime()
+        return runtime.get(RUNTIME_FIELD_START_TIMER_S, 0.0)
+
+
+class ConsumerStopTimerSensor(_BaseConsumerRuntimeSensor):
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+
+    def __init__(self, entry: ConfigEntry, consumer: dict) -> None:
+        super().__init__(entry, consumer, "Stop timer", "stop_timer_s")
+
+    @property
+    def native_value(self):
+        runtime = self._runtime()
+        return runtime.get(RUNTIME_FIELD_STOP_TIMER_S, 0.0)

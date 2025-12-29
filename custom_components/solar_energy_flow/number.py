@@ -5,6 +5,7 @@ from typing import Any
 from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.const import UnitOfPower, UnitOfTime
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -57,10 +58,18 @@ from .const import (
 )
 from .consumer_bindings import ConsumerBinding, get_consumer_binding
 from .coordinator import SolarEnergyFlowCoordinator
+from .helpers import (
+    RUNTIME_FIELD_CMD_W,
+    RUNTIME_FIELD_START_TIMER_S,
+    RUNTIME_FIELD_STOP_TIMER_S,
+    async_dispatch_consumer_runtime_update,
+    get_consumer_runtime,
+    get_entry_coordinator,
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
 
     entities: list[NumberEntity] = [
         SolarEnergyFlowNumber(
@@ -190,6 +199,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_CONTROLLED:
             continue
         entities.append(SolarEnergyFlowConsumerNumber(entry, consumer))
+        entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, True))
+        entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, False))
 
     async_add_entities(entities)
 
@@ -279,10 +290,11 @@ class SolarEnergyFlowConsumerNumber(RestoreNumber):
     def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
         self._entry = entry
         self._consumer = consumer
+        self._consumer_id = consumer[CONSUMER_ID]
         self._binding: ConsumerBinding | None = None
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{consumer[CONSUMER_ID]}_power"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{consumer[CONSUMER_ID]}")},
+            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
             via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
             name=consumer.get(CONSUMER_NAME, "Consumer"),
             manufacturer="Solar Energy Flow",
@@ -304,6 +316,68 @@ class SolarEnergyFlowConsumerNumber(RestoreNumber):
                 self._binding.set_desired_power(self._current_value)
         if self._binding is not None and self._consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID):
             await self._binding.async_push_power(self.hass)
+        self._update_consumer_runtime()
+
+    @property
+    def native_value(self) -> float | None:
+        return self._current_value
+
+    def _update_consumer_runtime(self) -> None:
+        if self.hass is None:
+            return
+        runtime = get_consumer_runtime(self.hass, self._entry.entry_id, self._consumer_id)
+        runtime[RUNTIME_FIELD_CMD_W] = float(self._current_value)
+        runtime.setdefault(RUNTIME_FIELD_START_TIMER_S, 0.0)
+        runtime.setdefault(RUNTIME_FIELD_STOP_TIMER_S, 0.0)
+        async_dispatch_consumer_runtime_update(self.hass, self._entry.entry_id, self._consumer_id)
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._current_value = float(value)
+        if self._binding is None:
+            self._update_consumer_runtime()
+            self.async_write_ha_state()
+            return
+        self._binding.set_desired_power(self._current_value)
+        await self._binding.async_push_power(self.hass)
+        self._update_consumer_runtime()
+        self.async_write_ha_state()
+
+
+class SolarEnergyFlowConsumerDelayNumber(RestoreNumber):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.BOX
+    _attr_native_step = 10.0
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 3600.0
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_should_poll = False
+
+    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any], is_start: bool) -> None:
+        self._entry = entry
+        self._consumer = consumer
+        self._is_start = is_start
+        self._consumer_id = consumer[CONSUMER_ID]
+        suffix = "start_delay_s" if is_start else "stop_delay_s"
+        name = "Start delay (s)" if is_start else "Stop delay (s)"
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{self._consumer_id}_{suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
+            name=consumer.get(CONSUMER_NAME, "Consumer"),
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider Consumer",
+        )
+        self._default_value = 60.0 if is_start else 300.0
+        self._current_value: float = self._default_value
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is not None and last.native_value is not None:
+            self._current_value = float(last.native_value)
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> float | None:
@@ -311,11 +385,6 @@ class SolarEnergyFlowConsumerNumber(RestoreNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         self._current_value = float(value)
-        if self._binding is None:
-            self.async_write_ha_state()
-            return
-        self._binding.set_desired_power(self._current_value)
-        await self._binding.async_push_power(self.hass)
         self.async_write_ha_state()
 
 

@@ -38,6 +38,12 @@ from .const import (
     CONF_RATE_LIMITER_ENABLED,
     CONF_MAX_OUTPUT_STEP,
     CONF_OUTPUT_EPSILON,
+    CONF_PV_MIN,
+    CONF_PV_MAX,
+    CONF_SP_MIN,
+    CONF_SP_MAX,
+    CONF_GRID_MIN,
+    CONF_GRID_MAX,
     DEFAULT_INVERT_PV,
     DEFAULT_INVERT_SP,
     DEFAULT_GRID_POWER_INVERT,
@@ -51,6 +57,12 @@ from .const import (
     DEFAULT_RATE_LIMITER_ENABLED,
     DEFAULT_MAX_OUTPUT_STEP,
     DEFAULT_OUTPUT_EPSILON,
+    DEFAULT_PV_MIN,
+    DEFAULT_PV_MAX,
+    DEFAULT_SP_MIN,
+    DEFAULT_SP_MAX,
+    DEFAULT_GRID_MIN,
+    DEFAULT_GRID_MAX,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
 )
@@ -87,6 +99,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if grid_domain not in _GRID_DOMAINS:
                 errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
 
+            range_valid = True
+            try:
+                pv_min = float(user_input[CONF_PV_MIN])
+                pv_max = float(user_input[CONF_PV_MAX])
+                sp_min = float(user_input[CONF_SP_MIN])
+                sp_max = float(user_input[CONF_SP_MAX])
+                grid_min = float(user_input[CONF_GRID_MIN])
+                grid_max = float(user_input[CONF_GRID_MAX])
+            except (TypeError, ValueError):
+                range_valid = False
+            else:
+                if pv_max <= pv_min or sp_max <= sp_min or grid_max <= grid_min:
+                    range_valid = False
+
+            if not range_valid:
+                errors["base"] = "invalid_range"
+
             if errors:
                 return self.async_show_form(step_id="user", data_schema=self._build_user_schema(), errors=errors)
 
@@ -121,6 +150,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_GRID_POWER_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
                 ),
+                vol.Required(CONF_PV_MIN, default=DEFAULT_PV_MIN): vol.Coerce(float),
+                vol.Required(CONF_PV_MAX, default=DEFAULT_PV_MAX): vol.Coerce(float),
+                vol.Required(CONF_SP_MIN, default=DEFAULT_SP_MIN): vol.Coerce(float),
+                vol.Required(CONF_SP_MAX, default=DEFAULT_SP_MAX): vol.Coerce(float),
+                vol.Required(CONF_GRID_MIN, default=DEFAULT_GRID_MIN): vol.Coerce(float),
+                vol.Required(CONF_GRID_MAX, default=DEFAULT_GRID_MAX): vol.Coerce(float),
             }
         )
 
@@ -145,6 +180,15 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         if value in (PID_MODE_DIRECT, PID_MODE_REVERSE):
             return value
         return DEFAULT_PID_MODE
+
+    @staticmethod
+    def _validate_range(min_val, max_val) -> bool:
+        try:
+            min_f = float(min_val)
+            max_f = float(max_val)
+        except (TypeError, ValueError):
+            return False
+        return max_f > min_f
 
     @staticmethod
     def _build_schema(defaults: dict) -> vol.Schema:
@@ -176,6 +220,12 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_UPDATE_INTERVAL,
                     default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+                vol.Required(CONF_PV_MIN, default=defaults[CONF_PV_MIN]): vol.Coerce(float),
+                vol.Required(CONF_PV_MAX, default=defaults[CONF_PV_MAX]): vol.Coerce(float),
+                vol.Required(CONF_SP_MIN, default=defaults[CONF_SP_MIN]): vol.Coerce(float),
+                vol.Required(CONF_SP_MAX, default=defaults[CONF_SP_MAX]): vol.Coerce(float),
+                vol.Required(CONF_GRID_MIN, default=defaults[CONF_GRID_MIN]): vol.Coerce(float),
+                vol.Required(CONF_GRID_MAX, default=defaults[CONF_GRID_MAX]): vol.Coerce(float),
             }
         )
 
@@ -227,6 +277,12 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 DEFAULT_UPDATE_INTERVAL,
                 min_value=1,
             ),
+            CONF_PV_MIN: o.get(CONF_PV_MIN, self._config_entry.data.get(CONF_PV_MIN, DEFAULT_PV_MIN)),
+            CONF_PV_MAX: o.get(CONF_PV_MAX, self._config_entry.data.get(CONF_PV_MAX, DEFAULT_PV_MAX)),
+            CONF_SP_MIN: o.get(CONF_SP_MIN, self._config_entry.data.get(CONF_SP_MIN, DEFAULT_SP_MIN)),
+            CONF_SP_MAX: o.get(CONF_SP_MAX, self._config_entry.data.get(CONF_SP_MAX, DEFAULT_SP_MAX)),
+            CONF_GRID_MIN: o.get(CONF_GRID_MIN, self._config_entry.data.get(CONF_GRID_MIN, DEFAULT_GRID_MIN)),
+            CONF_GRID_MAX: o.get(CONF_GRID_MAX, self._config_entry.data.get(CONF_GRID_MAX, DEFAULT_GRID_MAX)),
         }
 
         if user_input is not None:
@@ -244,6 +300,12 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     defaults[CONF_UPDATE_INTERVAL],
                     min_value=1,
                 ),
+                CONF_PV_MIN: user_input.get(CONF_PV_MIN, defaults[CONF_PV_MIN]),
+                CONF_PV_MAX: user_input.get(CONF_PV_MAX, defaults[CONF_PV_MAX]),
+                CONF_SP_MIN: user_input.get(CONF_SP_MIN, defaults[CONF_SP_MIN]),
+                CONF_SP_MAX: user_input.get(CONF_SP_MAX, defaults[CONF_SP_MAX]),
+                CONF_GRID_MIN: user_input.get(CONF_GRID_MIN, defaults[CONF_GRID_MIN]),
+                CONF_GRID_MAX: user_input.get(CONF_GRID_MAX, defaults[CONF_GRID_MAX]),
             }
 
             pv_domain = _extract_domain(cleaned[CONF_PROCESS_VALUE_ENTITY])
@@ -276,9 +338,17 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     output_epsilon_val = float(output_epsilon)
                 except (TypeError, ValueError):
                     errors["base"] = "invalid_output_epsilon"
-                else:
-                    if output_epsilon_val < 0:
-                        errors["base"] = "invalid_output_epsilon"
+            else:
+                if output_epsilon_val < 0:
+                    errors["base"] = "invalid_output_epsilon"
+
+            if "base" not in errors:
+                if not self._validate_range(cleaned[CONF_PV_MIN], cleaned[CONF_PV_MAX]):
+                    errors["base"] = "invalid_pv_range"
+                elif not self._validate_range(cleaned[CONF_SP_MIN], cleaned[CONF_SP_MAX]):
+                    errors["base"] = "invalid_sp_range"
+                elif not self._validate_range(cleaned[CONF_GRID_MIN], cleaned[CONF_GRID_MAX]):
+                    errors["base"] = "invalid_grid_range"
 
             if errors:
                 return self.async_show_form(

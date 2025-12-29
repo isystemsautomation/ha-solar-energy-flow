@@ -14,21 +14,29 @@ from .coordinator import SolarEnergyFlowCoordinator
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            SolarEnergyFlowEffectiveSPSensor(coordinator, entry),
-            SolarEnergyFlowPVValueSensor(coordinator, entry),
-            SolarEnergyFlowOutputSensor(coordinator, entry),
-            SolarEnergyFlowErrorSensor(coordinator, entry),
-            SolarEnergyFlowStatusSensor(coordinator, entry),
-            SolarEnergyFlowGridPowerSensor(coordinator, entry),
-            SolarEnergyFlowPTermSensor(coordinator, entry),
-            SolarEnergyFlowITermSensor(coordinator, entry),
-            SolarEnergyFlowDTermSensor(coordinator, entry),
-            SolarEnergyFlowLimiterStateSensor(coordinator, entry),
-            SolarEnergyFlowOutputPreRateLimitSensor(coordinator, entry),
-        ]
-    )
+    entities = [
+        SolarEnergyFlowEffectiveSPSensor(coordinator, entry),
+        SolarEnergyFlowPVValueSensor(coordinator, entry),
+        SolarEnergyFlowOutputSensor(coordinator, entry),
+        SolarEnergyFlowErrorSensor(coordinator, entry),
+        SolarEnergyFlowStatusSensor(coordinator, entry),
+        SolarEnergyFlowGridPowerSensor(coordinator, entry),
+        SolarEnergyFlowPTermSensor(coordinator, entry),
+        SolarEnergyFlowITermSensor(coordinator, entry),
+        SolarEnergyFlowDTermSensor(coordinator, entry),
+        SolarEnergyFlowLimiterStateSensor(coordinator, entry),
+        SolarEnergyFlowOutputPreRateLimitSensor(coordinator, entry),
+    ]
+
+    if coordinator.is_energy_divider_enabled():
+        entities.extend(
+            [
+                SolarEnergyFlowDividerPredictedSurplusSensor(coordinator, entry),
+                SolarEnergyFlowDividerEVAllowedSensor(coordinator, entry),
+            ]
+        )
+
+    async_add_entities(entities)
 
 
 class _BaseFlowSensor(CoordinatorEntity, SensorEntity):
@@ -194,3 +202,29 @@ class SolarEnergyFlowOutputPreRateLimitSensor(_BaseFlowSensor):
         data = self._data
         value = getattr(data, "output_pre_rate_limit", None)
         return round(value, 1) if value is not None else None
+
+
+class SolarEnergyFlowDividerPredictedSurplusSensor(_BaseFlowSensor):
+    _attr_icon = "mdi:transmission-tower-export"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "Energy Divider Predicted Surplus", "energy_divider_predicted_surplus")
+
+    @property
+    def native_value(self):
+        data = self._data
+        return getattr(data, "divider_predicted_surplus", None)
+
+
+class SolarEnergyFlowDividerEVAllowedSensor(_BaseFlowSensor):
+    _attr_icon = "mdi:ev-plug-type2"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "Energy Divider EV Allowed", "energy_divider_ev_allowed")
+
+    @property
+    def native_value(self):
+        data = self._data
+        return getattr(data, "divider_ev_allowed", None)

@@ -22,7 +22,9 @@
           "sp_min": "SP min (raw units)",
           "sp_max": "SP max (raw units)",
           "grid_min": "Grid min (raw units)",
-          "grid_max": "Grid max (raw units)"
+          "grid_max": "Grid max (raw units)",
+          "energy_divider_enabled": "Enable Energy Divider entities",
+          "energy_divider_strategy": "Energy Divider Strategy"
         }
       }
     }
@@ -47,13 +49,22 @@
           "sp_min": "SP min (raw units)",
           "sp_max": "SP max (raw units)",
           "grid_min": "Grid min (raw units)",
-          "grid_max": "Grid max (raw units)"
+          "grid_max": "Grid max (raw units)",
+          "energy_divider_enabled": "Enable Energy Divider entities",
+          "energy_divider_strategy": "Energy Divider Strategy"
         },
         "data_description": {
           "pid_mode": {
             "options": {
               "direct": "Positive error increases output",
               "reverse": "Positive error decreases output"
+            }
+          },
+          "energy_divider_strategy": {
+            "options": {
+              "balanced": "Balanced",
+              "ev_priority": "EV priority",
+              "pv_priority": "PV priority"
             }
           }
         }
@@ -68,10 +79,19 @@
       "invalid_output_epsilon": "Output epsilon must be zero or positive.",
       "invalid_pv_range": "PV max must be greater than PV min.",
       "invalid_sp_range": "SP max must be greater than SP min.",
-      "invalid_grid_range": "Grid max must be greater than Grid min."
+      "invalid_grid_range": "Grid max must be greater than Grid min.",
+      "invalid_energy_divider_strategy": "Select a valid Energy Divider strategy."
     }
   },
   "entity": {
+    "sensor": {
+      "solar_energy_flow_energy_divider_predicted_surplus": {
+        "name": "Energy Divider Predicted Surplus"
+      },
+      "solar_energy_flow_energy_divider_ev_allowed": {
+        "name": "Energy Divider EV Allowed"
+      }
+    },
     "select": {
       "solar_energy_flow_runtime_mode": {
         "name": "Runtime mode",
@@ -81,11 +101,22 @@
           "HOLD": "HOLD",
           "MANUAL OUT": "MANUAL OUT"
         }
+      },
+      "solar_energy_flow_energy_divider_strategy": {
+        "name": "Energy Divider Strategy",
+        "options": {
+          "balanced": "Balanced",
+          "ev_priority": "EV priority",
+          "pv_priority": "PV priority"
+        }
       }
     },
     "switch": {
       "solar_energy_flow_rate_limiter": {
         "name": "Rate limiter"
+      },
+      "solar_energy_flow_energy_divider_enabled": {
+        "name": "Energy Divider Enabled"
       }
     },
     "number": {

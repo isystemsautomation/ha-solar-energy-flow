@@ -87,6 +87,11 @@ from .const import (
     RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
+    CONF_ENERGY_DIVIDER_ENABLED,
+    CONF_ENERGY_DIVIDER_STRATEGY,
+    DEFAULT_ENERGY_DIVIDER_ENABLED,
+    DEFAULT_ENERGY_DIVIDER_STRATEGY,
+    ENERGY_DIVIDER_STRATEGIES,
 )
 from .pid import PID, PIDConfig, PIDStepResult
 
@@ -113,6 +118,9 @@ class FlowState:
     p_term: float | None
     i_term: float | None
     d_term: float | None
+    divider_predicted_surplus: float | None
+    divider_ev_allowed: bool | None
+    energy_divider_enabled: bool
 
 
 @dataclass
@@ -401,6 +409,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._previous_runtime_mode = self._runtime_mode
         self._invalid_output_reported = False
         self._output_write_failed_reported = False
+        self._divider_predicted_surplus: float | None = None
+        self._divider_ev_allowed: bool | None = None
 
     def _get_normal_setpoint_value(self) -> float | None:
         """Return the current external setpoint with inversion applied (no limiter)."""
@@ -418,6 +428,60 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._manual_sp_value = value
         self._manual_sp_initialized = True
         return value
+
+    def is_energy_divider_enabled(self) -> bool:
+        return bool(self.entry.options.get(CONF_ENERGY_DIVIDER_ENABLED, DEFAULT_ENERGY_DIVIDER_ENABLED))
+
+    def get_energy_divider_strategy(self) -> str:
+        strategy = self.entry.options.get(CONF_ENERGY_DIVIDER_STRATEGY, DEFAULT_ENERGY_DIVIDER_STRATEGY)
+        if strategy not in ENERGY_DIVIDER_STRATEGIES:
+            return DEFAULT_ENERGY_DIVIDER_STRATEGY
+        return strategy
+
+    async def async_set_energy_divider_enabled(self, enabled: bool) -> None:
+        options = dict(self.entry.options)
+        options[CONF_ENERGY_DIVIDER_ENABLED] = bool(enabled)
+        options.setdefault(CONF_ENERGY_DIVIDER_STRATEGY, DEFAULT_ENERGY_DIVIDER_STRATEGY)
+        self.apply_options(options)
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        await self.async_request_refresh()
+
+    async def async_set_energy_divider_strategy(self, strategy: str) -> None:
+        if strategy not in ENERGY_DIVIDER_STRATEGIES:
+            strategy = DEFAULT_ENERGY_DIVIDER_STRATEGY
+        options = dict(self.entry.options)
+        options[CONF_ENERGY_DIVIDER_STRATEGY] = strategy
+        self.apply_options(options)
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        await self.async_request_refresh()
+
+    async def async_set_pid_enabled(self, enabled: bool) -> None:
+        options = dict(self.entry.options)
+        options[CONF_ENABLED] = bool(enabled)
+        self.apply_options(options)
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        await self.async_request_refresh()
+
+    async def async_set_runtime_mode(self, runtime_mode: str) -> None:
+        mode = (
+            runtime_mode
+            if runtime_mode
+            in (RUNTIME_MODE_AUTO_SP, RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD, RUNTIME_MODE_MANUAL_OUT)
+            else DEFAULT_RUNTIME_MODE
+        )
+        options = dict(self.entry.options)
+        options[CONF_RUNTIME_MODE] = mode
+        self.apply_options(options)
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        await self.async_request_refresh()
+
+    def update_energy_divider_state(
+        self, predicted_surplus: float | None = None, ev_allowed: bool | None = None
+    ) -> None:
+        if predicted_surplus is not None:
+            self._divider_predicted_surplus = predicted_surplus
+        if ev_allowed is not None:
+            self._divider_ev_allowed = ev_allowed
 
     def _get_range_value(
         self,
@@ -798,6 +862,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         for key in wiring_keys:
             if old.get(key) != new.get(key):
                 return True
+        if old.get(CONF_ENERGY_DIVIDER_ENABLED, DEFAULT_ENERGY_DIVIDER_ENABLED) != new.get(
+            CONF_ENERGY_DIVIDER_ENABLED, DEFAULT_ENERGY_DIVIDER_ENABLED
+        ):
+            return True
         return False
 
     def apply_options(self, options: Mapping[str, Any]) -> None:
@@ -1008,6 +1076,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         prev_pv_for_pid = self._last_pv_pct
         prev_runtime_mode = self._previous_runtime_mode
         prev_manual_sp_value = self._manual_sp_value
+        divider_enabled = self.is_energy_divider_enabled()
+        divider_predicted_surplus = self._divider_predicted_surplus if divider_enabled else None
+        divider_ev_allowed = self._divider_ev_allowed if divider_enabled else None
 
         options = self._build_runtime_options()
         inputs = self._read_inputs(options)
@@ -1043,6 +1114,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 p_term=None,
                 i_term=None,
                 d_term=None,
+                divider_predicted_surplus=divider_predicted_surplus,
+                divider_ev_allowed=divider_ev_allowed,
+                energy_divider_enabled=divider_enabled,
             )
 
         output_plan = self._calculate_output_plan(
@@ -1076,6 +1150,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             p_term=output_plan.p_term,
             i_term=output_plan.i_term,
             d_term=output_plan.d_term,
+            divider_predicted_surplus=divider_predicted_surplus,
+            divider_ev_allowed=divider_ev_allowed,
+            energy_divider_enabled=divider_enabled,
         )
 
 # Manual test checklist:

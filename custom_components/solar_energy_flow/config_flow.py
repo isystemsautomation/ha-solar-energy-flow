@@ -65,6 +65,11 @@ from .const import (
     DEFAULT_GRID_MAX,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
+    CONF_ENERGY_DIVIDER_ENABLED,
+    CONF_ENERGY_DIVIDER_STRATEGY,
+    DEFAULT_ENERGY_DIVIDER_ENABLED,
+    DEFAULT_ENERGY_DIVIDER_STRATEGY,
+    ENERGY_DIVIDER_STRATEGIES,
 )
 
 _PV_DOMAINS = {"sensor", "number", "input_number"}
@@ -98,6 +103,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_OUTPUT_ENTITY] = "invalid_output_domain"
             if grid_domain not in _GRID_DOMAINS:
                 errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
+            if user_input.get(
+                CONF_ENERGY_DIVIDER_STRATEGY, DEFAULT_ENERGY_DIVIDER_STRATEGY
+            ) not in ENERGY_DIVIDER_STRATEGIES:
+                errors[CONF_ENERGY_DIVIDER_STRATEGY] = "invalid_energy_divider_strategy"
 
             range_valid = True
             try:
@@ -156,6 +165,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SP_MAX, default=DEFAULT_SP_MAX): vol.Coerce(float),
                 vol.Required(CONF_GRID_MIN, default=DEFAULT_GRID_MIN): vol.Coerce(float),
                 vol.Required(CONF_GRID_MAX, default=DEFAULT_GRID_MAX): vol.Coerce(float),
+                vol.Optional(
+                    CONF_ENERGY_DIVIDER_ENABLED, default=DEFAULT_ENERGY_DIVIDER_ENABLED
+                ): bool,
+                vol.Optional(
+                    CONF_ENERGY_DIVIDER_STRATEGY, default=DEFAULT_ENERGY_DIVIDER_STRATEGY
+                ): vol.In(ENERGY_DIVIDER_STRATEGIES),
             }
         )
 
@@ -226,6 +241,14 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_SP_MAX, default=defaults[CONF_SP_MAX]): vol.Coerce(float),
                 vol.Required(CONF_GRID_MIN, default=defaults[CONF_GRID_MIN]): vol.Coerce(float),
                 vol.Required(CONF_GRID_MAX, default=defaults[CONF_GRID_MAX]): vol.Coerce(float),
+                vol.Optional(
+                    CONF_ENERGY_DIVIDER_ENABLED,
+                    default=defaults.get(CONF_ENERGY_DIVIDER_ENABLED, DEFAULT_ENERGY_DIVIDER_ENABLED),
+                ): bool,
+                vol.Optional(
+                    CONF_ENERGY_DIVIDER_STRATEGY,
+                    default=defaults.get(CONF_ENERGY_DIVIDER_STRATEGY, DEFAULT_ENERGY_DIVIDER_STRATEGY),
+                ): vol.In(ENERGY_DIVIDER_STRATEGIES),
             }
         )
 
@@ -255,6 +278,8 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_GRID_POWER_ENTITY: o.get(
                 CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY, "")
             ),
+            CONF_ENERGY_DIVIDER_ENABLED: o.get(CONF_ENERGY_DIVIDER_ENABLED, DEFAULT_ENERGY_DIVIDER_ENABLED),
+            CONF_ENERGY_DIVIDER_STRATEGY: o.get(CONF_ENERGY_DIVIDER_STRATEGY, DEFAULT_ENERGY_DIVIDER_STRATEGY),
         }
 
         defaults = {
@@ -283,6 +308,8 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_SP_MAX: o.get(CONF_SP_MAX, self._config_entry.data.get(CONF_SP_MAX, DEFAULT_SP_MAX)),
             CONF_GRID_MIN: o.get(CONF_GRID_MIN, self._config_entry.data.get(CONF_GRID_MIN, DEFAULT_GRID_MIN)),
             CONF_GRID_MAX: o.get(CONF_GRID_MAX, self._config_entry.data.get(CONF_GRID_MAX, DEFAULT_GRID_MAX)),
+            CONF_ENERGY_DIVIDER_ENABLED: o.get(CONF_ENERGY_DIVIDER_ENABLED, DEFAULT_ENERGY_DIVIDER_ENABLED),
+            CONF_ENERGY_DIVIDER_STRATEGY: o.get(CONF_ENERGY_DIVIDER_STRATEGY, DEFAULT_ENERGY_DIVIDER_STRATEGY),
         }
 
         if user_input is not None:
@@ -306,6 +333,12 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_SP_MAX: user_input.get(CONF_SP_MAX, defaults[CONF_SP_MAX]),
                 CONF_GRID_MIN: user_input.get(CONF_GRID_MIN, defaults[CONF_GRID_MIN]),
                 CONF_GRID_MAX: user_input.get(CONF_GRID_MAX, defaults[CONF_GRID_MAX]),
+                CONF_ENERGY_DIVIDER_ENABLED: user_input.get(
+                    CONF_ENERGY_DIVIDER_ENABLED, defaults[CONF_ENERGY_DIVIDER_ENABLED]
+                ),
+                CONF_ENERGY_DIVIDER_STRATEGY: user_input.get(
+                    CONF_ENERGY_DIVIDER_STRATEGY, defaults[CONF_ENERGY_DIVIDER_STRATEGY]
+                ),
             }
 
             pv_domain = _extract_domain(cleaned[CONF_PROCESS_VALUE_ENTITY])
@@ -338,9 +371,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     output_epsilon_val = float(output_epsilon)
                 except (TypeError, ValueError):
                     errors["base"] = "invalid_output_epsilon"
-            else:
-                if output_epsilon_val < 0:
-                    errors["base"] = "invalid_output_epsilon"
+                else:
+                    if output_epsilon_val < 0:
+                        errors["base"] = "invalid_output_epsilon"
 
             if "base" not in errors:
                 if not self._validate_range(cleaned[CONF_PV_MIN], cleaned[CONF_PV_MAX]):

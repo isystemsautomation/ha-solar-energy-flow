@@ -82,4 +82,10 @@ RUNTIME_MODE_MANUAL_SP = "MANUAL SP"
 RUNTIME_MODE_HOLD = "HOLD"
 RUNTIME_MODE_MANUAL_OUT = "MANUAL OUT"
 
+CONF_ENERGY_DIVIDER_ENABLED = "energy_divider_enabled"
+CONF_ENERGY_DIVIDER_STRATEGY = "energy_divider_strategy"
+DEFAULT_ENERGY_DIVIDER_ENABLED = False
+DEFAULT_ENERGY_DIVIDER_STRATEGY = "balanced"
+ENERGY_DIVIDER_STRATEGIES = ["balanced", "ev_priority", "pv_priority"]
+
 PLATFORMS = ["sensor", "switch", "number", "select"]

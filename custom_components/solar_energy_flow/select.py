@@ -18,6 +18,10 @@ from .const import (
     CONF_RUNTIME_MODE,
     CONF_MANUAL_SP_VALUE,
     CONF_MANUAL_OUT_VALUE,
+    CONF_ENERGY_DIVIDER_ENABLED,
+    CONF_ENERGY_DIVIDER_STRATEGY,
+    DEFAULT_ENERGY_DIVIDER_ENABLED,
+    DEFAULT_ENERGY_DIVIDER_STRATEGY,
     DEFAULT_ENABLED,
     DEFAULT_GRID_LIMITER_DEADBAND_W,
     DEFAULT_GRID_LIMITER_ENABLED,
@@ -34,34 +38,48 @@ from .const import (
     RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
+    ENERGY_DIVIDER_STRATEGIES,
 )
 from .coordinator import SolarEnergyFlowCoordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
+    entities: list[SelectEntity] = [
+        SolarEnergyFlowSelect(
+            coordinator,
+            entry,
+            CONF_GRID_LIMITER_TYPE,
+            "Grid limiter type",
+            [GRID_LIMITER_TYPE_IMPORT, GRID_LIMITER_TYPE_EXPORT],
+            DEFAULT_GRID_LIMITER_TYPE,
+            EntityCategory.CONFIG,
+        ),
+        SolarEnergyFlowSelect(
+            coordinator,
+            entry,
+            CONF_RUNTIME_MODE,
+            "Runtime mode",
+            [RUNTIME_MODE_AUTO_SP, RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD, RUNTIME_MODE_MANUAL_OUT],
+            DEFAULT_RUNTIME_MODE,
+            None,
+        ),
+    ]
+
+    if coordinator.is_energy_divider_enabled():
+        entities.append(
             SolarEnergyFlowSelect(
                 coordinator,
                 entry,
-                CONF_GRID_LIMITER_TYPE,
-                "Grid limiter type",
-                [GRID_LIMITER_TYPE_IMPORT, GRID_LIMITER_TYPE_EXPORT],
-                DEFAULT_GRID_LIMITER_TYPE,
+                CONF_ENERGY_DIVIDER_STRATEGY,
+                "Energy Divider Strategy",
+                ENERGY_DIVIDER_STRATEGIES,
+                DEFAULT_ENERGY_DIVIDER_STRATEGY,
                 EntityCategory.CONFIG,
-            ),
-            SolarEnergyFlowSelect(
-                coordinator,
-                entry,
-                CONF_RUNTIME_MODE,
-                "Runtime mode",
-                [RUNTIME_MODE_AUTO_SP, RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD, RUNTIME_MODE_MANUAL_OUT],
-                DEFAULT_RUNTIME_MODE,
-                None,
-            ),
-        ]
-    )
+            )
+        )
+
+    async_add_entities(entities)
 
 
 class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
@@ -110,6 +128,7 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
         options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
         options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
         options.setdefault(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        options.setdefault(CONF_ENERGY_DIVIDER_ENABLED, DEFAULT_ENERGY_DIVIDER_ENABLED)
 
         if self._option_key == CONF_GRID_LIMITER_TYPE and option not in (
             GRID_LIMITER_TYPE_IMPORT,

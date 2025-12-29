@@ -54,6 +54,41 @@
     }
   },
   "entity": {
+    "sensor": {
+      "solar_energy_flow_effective_sp": {
+        "name": "Effective SP"
+      },
+      "solar_energy_flow_pv_value": {
+        "name": "PV value"
+      },
+      "solar_energy_flow_output": {
+        "name": "Output"
+      },
+      "solar_energy_flow_error": {
+        "name": "Error"
+      },
+      "solar_energy_flow_status": {
+        "name": "Status"
+      },
+      "solar_energy_flow_grid_power": {
+        "name": "Grid power"
+      },
+      "solar_energy_flow_p_term": {
+        "name": "P term"
+      },
+      "solar_energy_flow_i_term": {
+        "name": "I term"
+      },
+      "solar_energy_flow_d_term": {
+        "name": "D term"
+      },
+      "solar_energy_flow_limiter_state": {
+        "name": "Limiter state"
+      },
+      "solar_energy_flow_output_pre_rate_limit": {
+        "name": "Output (pre rate limit)"
+      }
+    },
     "select": {
       "solar_energy_flow_runtime_mode": {
         "name": "Runtime mode",
@@ -63,9 +98,22 @@
           "HOLD": "HOLD",
           "MANUAL OUT": "MANUAL OUT"
         }
+      },
+      "solar_energy_flow_grid_limiter_type": {
+        "name": "Grid limiter type",
+        "options": {
+          "import": "Import",
+          "export": "Export"
+        }
       }
     },
     "switch": {
+      "solar_energy_flow_enabled": {
+        "name": "Enabled"
+      },
+      "solar_energy_flow_grid_limiter": {
+        "name": "Grid limiter enabled"
+      },
       "solar_energy_flow_rate_limiter": {
         "name": "Rate limiter"
       }

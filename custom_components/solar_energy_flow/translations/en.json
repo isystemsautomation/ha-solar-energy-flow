@@ -76,7 +76,8 @@
       "invalid_output_epsilon": "Output epsilon must be zero or positive.",
       "invalid_pv_range": "PV max must be greater than PV min.",
       "invalid_sp_range": "SP max must be greater than SP min.",
-      "invalid_grid_range": "Grid max must be greater than Grid min."
+      "invalid_grid_range": "Grid max must be greater than Grid min.",
+      "invalid_consumer_settings": "Consumer settings are out of range."
     }
   },
   "entity": {

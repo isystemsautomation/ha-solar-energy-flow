@@ -85,6 +85,14 @@ from .const import (
     CONSUMER_OFF_THRESHOLD_W,
     CONSUMER_TYPE_BINARY,
     CONSUMER_TYPE_CONTROLLED,
+    CONSUMER_STEP_W,
+    CONSUMER_PID_DEADBAND_PCT,
+    CONSUMER_DEFAULT_STEP_W,
+    CONSUMER_MIN_STEP_W,
+    CONSUMER_MAX_STEP_W,
+    CONSUMER_DEFAULT_PID_DEADBAND_PCT,
+    CONSUMER_MIN_PID_DEADBAND_PCT,
+    CONSUMER_MAX_PID_DEADBAND_PCT,
 )
 
 _PV_DOMAINS = {"sensor", "number", "input_number"}
@@ -557,6 +565,20 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Required(
                         CONSUMER_POWER_TARGET_ENTITY_ID, default=defaults.get(CONSUMER_POWER_TARGET_ENTITY_ID, "")
                     ): selector.EntitySelector(selector.EntitySelectorConfig(domain=["number", "input_number"])),
+                    vol.Required(
+                        CONSUMER_STEP_W,
+                        default=defaults.get(CONSUMER_STEP_W, CONSUMER_DEFAULT_STEP_W),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.Range(min=CONSUMER_MIN_STEP_W, max=CONSUMER_MAX_STEP_W),
+                    ),
+                    vol.Required(
+                        CONSUMER_PID_DEADBAND_PCT,
+                        default=defaults.get(CONSUMER_PID_DEADBAND_PCT, CONSUMER_DEFAULT_PID_DEADBAND_PCT),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.Range(min=CONSUMER_MIN_PID_DEADBAND_PCT, max=CONSUMER_MAX_PID_DEADBAND_PCT),
+                    ),
                 }
             )
         else:
@@ -603,6 +625,18 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             power_target_domain = _extract_domain(user_input.get(CONSUMER_POWER_TARGET_ENTITY_ID))
             if power_target_domain and power_target_domain not in {"number", "input_number"}:
                 errors[CONSUMER_POWER_TARGET_ENTITY_ID] = "invalid_power_target_domain"
+            try:
+                step_w = float(user_input.get(CONSUMER_STEP_W, CONSUMER_DEFAULT_STEP_W))
+                pid_deadband_pct = float(
+                    user_input.get(CONSUMER_PID_DEADBAND_PCT, CONSUMER_DEFAULT_PID_DEADBAND_PCT)
+                )
+                if not (
+                    CONSUMER_MIN_STEP_W <= step_w <= CONSUMER_MAX_STEP_W
+                    and CONSUMER_MIN_PID_DEADBAND_PCT <= pid_deadband_pct <= CONSUMER_MAX_PID_DEADBAND_PCT
+                ):
+                    errors["base"] = "invalid_consumer_settings"
+            except (TypeError, ValueError):
+                errors["base"] = "invalid_consumer_settings"
 
         if consumer_type == CONSUMER_TYPE_BINARY:
             try:
@@ -630,6 +664,10 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             consumer[CONSUMER_MIN_POWER_W] = float(user_input[CONSUMER_MIN_POWER_W])
             consumer[CONSUMER_MAX_POWER_W] = float(user_input[CONSUMER_MAX_POWER_W])
             consumer[CONSUMER_POWER_TARGET_ENTITY_ID] = user_input.get(CONSUMER_POWER_TARGET_ENTITY_ID, "")
+            consumer[CONSUMER_STEP_W] = float(user_input.get(CONSUMER_STEP_W, CONSUMER_DEFAULT_STEP_W))
+            consumer[CONSUMER_PID_DEADBAND_PCT] = float(
+                user_input.get(CONSUMER_PID_DEADBAND_PCT, CONSUMER_DEFAULT_PID_DEADBAND_PCT)
+            )
         else:
             consumer[CONSUMER_ON_THRESHOLD_W] = float(user_input[CONSUMER_ON_THRESHOLD_W])
             consumer[CONSUMER_OFF_THRESHOLD_W] = float(user_input[CONSUMER_OFF_THRESHOLD_W])

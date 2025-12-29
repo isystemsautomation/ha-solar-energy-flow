@@ -5,7 +5,7 @@ from typing import Any
 from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.const import UnitOfPower, UnitOfTime
+from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTime
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -57,6 +57,14 @@ from .const import (
     CONSUMER_MIN_POWER_W,
     CONSUMER_MAX_POWER_W,
     CONSUMER_POWER_TARGET_ENTITY_ID,
+    CONSUMER_STEP_W,
+    CONSUMER_PID_DEADBAND_PCT,
+    CONSUMER_DEFAULT_STEP_W,
+    CONSUMER_MIN_STEP_W,
+    CONSUMER_MAX_STEP_W,
+    CONSUMER_DEFAULT_PID_DEADBAND_PCT,
+    CONSUMER_MIN_PID_DEADBAND_PCT,
+    CONSUMER_MAX_PID_DEADBAND_PCT,
 )
 from .consumer_bindings import ConsumerBinding, get_consumer_binding
 from .coordinator import SolarEnergyFlowCoordinator
@@ -201,6 +209,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_CONTROLLED:
             continue
         entities.append(SolarEnergyFlowConsumerNumber(entry, consumer))
+        entities.append(SolarEnergyFlowConsumerStepNumber(entry, consumer))
+        entities.append(SolarEnergyFlowConsumerPidDeadbandNumber(entry, consumer))
         entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, True))
         entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, False))
 
@@ -343,6 +353,73 @@ class SolarEnergyFlowConsumerNumber(RestoreNumber):
         await self._binding.async_push_power(self.hass)
         self._update_consumer_runtime()
         self.async_write_ha_state()
+
+
+class _BaseConsumerConfigNumber(RestoreNumber):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.BOX
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        consumer: dict[str, Any],
+        name: str,
+        unique_suffix: str,
+    ) -> None:
+        self._entry = entry
+        self._consumer = consumer
+        self._consumer_id = consumer[CONSUMER_ID]
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{self._consumer_id}_{unique_suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
+            name=consumer.get(CONSUMER_NAME, "Consumer"),
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider Consumer",
+        )
+        self._current_value: float = 0.0
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is not None and last.native_value is not None:
+            self._current_value = float(last.native_value)
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float | None:
+        return self._current_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._current_value = float(value)
+        self.async_write_ha_state()
+
+
+class SolarEnergyFlowConsumerStepNumber(_BaseConsumerConfigNumber):
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_native_step = 10.0
+    _attr_native_min_value = CONSUMER_MIN_STEP_W
+    _attr_native_max_value = CONSUMER_MAX_STEP_W
+
+    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
+        super().__init__(entry, consumer, "Step (W)", "step_w")
+        self._current_value = float(consumer.get(CONSUMER_STEP_W, CONSUMER_DEFAULT_STEP_W))
+
+
+class SolarEnergyFlowConsumerPidDeadbandNumber(_BaseConsumerConfigNumber):
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_native_step = 1.0
+    _attr_native_min_value = CONSUMER_MIN_PID_DEADBAND_PCT
+    _attr_native_max_value = CONSUMER_MAX_PID_DEADBAND_PCT
+
+    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
+        super().__init__(entry, consumer, "PID deadband (%)", "pid_deadband_pct")
+        self._current_value = float(
+            consumer.get(CONSUMER_PID_DEADBAND_PCT, CONSUMER_DEFAULT_PID_DEADBAND_PCT)
+        )
 
 
 class SolarEnergyFlowConsumerDelayNumber(RestoreNumber):

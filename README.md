@@ -26,7 +26,6 @@ Designed for **energy flow control** scenarios such as inverter power limiting, 
 - Optional grid import/export limiter
 - Optional output rate limiting
 - Fully configurable from the Home Assistant UI
-- Uses `DataUpdateCoordinator`
 
 ---
 
@@ -58,8 +57,6 @@ What this means:
 - **100% PID output** represents your configured *maximum output*
 - PV/SP/Grid units do not matter (because values are normalized before PID)
 - Gains do **not** need re-scaling when you change sensor ranges or units
-
-> ⚠️ Changing PV/SP/Grid min/max ranges changes PID behavior and may require retuning.
 
 ---
 

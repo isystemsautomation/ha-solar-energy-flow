@@ -1,5 +1,11 @@
 {
   "config": {
+    "error": {
+      "invalid_pv_domain": "Select a sensor, number, or input_number entity for the process value.",
+      "invalid_setpoint_domain": "Select a number or input_number entity for the setpoint.",
+      "invalid_output_domain": "Output must be a number or input_number entity.",
+      "invalid_grid_domain": "Select a sensor, number, or input_number entity for grid power."
+    },
     "step": {
       "user": {
         "title": "Solar Energy Flow Controller",
@@ -40,7 +46,12 @@
         }
       }
     },
-    "error": {}
+    "error": {
+      "invalid_pv_domain": "Select a sensor, number, or input_number entity for the process value.",
+      "invalid_setpoint_domain": "Select a number or input_number entity for the setpoint.",
+      "invalid_output_domain": "Output must be a number or input_number entity.",
+      "invalid_grid_domain": "Select a sensor, number, or input_number entity for grid power."
+    }
   },
   "entity": {
     "select": {

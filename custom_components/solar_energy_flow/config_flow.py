@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.helpers import selector
 
 from .const import (
     DOMAIN,
@@ -50,32 +51,74 @@ from .const import (
     PID_MODE_REVERSE,
 )
 
+_PV_DOMAINS = {"sensor", "number", "input_number"}
+_SETPOINT_DOMAINS = {"number", "input_number"}
+_OUTPUT_DOMAINS = {"number", "input_number"}
+_GRID_DOMAINS = {"sensor", "number", "input_number"}
+
+
+def _extract_domain(entity_id: str | None) -> str | None:
+    if not entity_id or "." not in entity_id:
+        return None
+    return entity_id.split(".", 1)[0]
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
+        errors: dict[str, str] = {}
         if user_input is not None:
-            unique_id = f"{user_input[CONF_PROCESS_VALUE_ENTITY]}::{user_input[CONF_SETPOINT_ENTITY]}::{user_input[CONF_OUTPUT_ENTITY]}"
+            pv_domain = _extract_domain(user_input[CONF_PROCESS_VALUE_ENTITY])
+            sp_domain = _extract_domain(user_input[CONF_SETPOINT_ENTITY])
+            output_domain = _extract_domain(user_input[CONF_OUTPUT_ENTITY])
+            grid_domain = _extract_domain(user_input[CONF_GRID_POWER_ENTITY])
+
+            if pv_domain not in _PV_DOMAINS:
+                errors[CONF_PROCESS_VALUE_ENTITY] = "invalid_pv_domain"
+            if sp_domain not in _SETPOINT_DOMAINS:
+                errors[CONF_SETPOINT_ENTITY] = "invalid_setpoint_domain"
+            if output_domain not in _OUTPUT_DOMAINS:
+                errors[CONF_OUTPUT_ENTITY] = "invalid_output_domain"
+            if grid_domain not in _GRID_DOMAINS:
+                errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
+
+            if errors:
+                return self.async_show_form(step_id="user", data_schema=self._build_user_schema(), errors=errors)
+
+            unique_id = (
+                f"{user_input[CONF_PROCESS_VALUE_ENTITY]}::{user_input[CONF_SETPOINT_ENTITY]}::{user_input[CONF_OUTPUT_ENTITY]}"
+            )
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
             name = user_input.pop(CONF_NAME)
             return self.async_create_entry(title=name, data=user_input)
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_NAME): str,
-                vol.Required(CONF_PROCESS_VALUE_ENTITY): str,
-                vol.Required(CONF_SETPOINT_ENTITY): str,
-                vol.Required(CONF_OUTPUT_ENTITY): str,
-                vol.Required(CONF_GRID_POWER_ENTITY): str,
-            }
-        )
-        return self.async_show_form(step_id="user", data_schema=schema)
+        return self.async_show_form(step_id="user", data_schema=self._build_user_schema(), errors=errors)
 
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         return SolarEnergyFlowOptionsFlowHandler(config_entry)
+
+    @staticmethod
+    def _build_user_schema() -> vol.Schema:
+        return vol.Schema(
+            {
+                vol.Required(CONF_NAME): str,
+                vol.Required(CONF_PROCESS_VALUE_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_PV_DOMAINS))
+                ),
+                vol.Required(CONF_SETPOINT_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_SETPOINT_DOMAINS))
+                ),
+                vol.Required(CONF_OUTPUT_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_OUTPUT_DOMAINS))
+                ),
+                vol.Required(CONF_GRID_POWER_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
+                ),
+            }
+        )
 
 
 class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
@@ -103,10 +146,18 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
     def _build_schema(defaults: dict) -> vol.Schema:
         return vol.Schema(
             {
-                vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): str,
-                vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): str,
-                vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): str,
-                vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): str,
+                vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_PV_DOMAINS))
+                ),
+                vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_SETPOINT_DOMAINS))
+                ),
+                vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_OUTPUT_DOMAINS))
+                ),
+                vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
+                ),
                 vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
                 vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
                 vol.Optional(
@@ -188,6 +239,27 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     min_value=1,
                 ),
             }
+
+            pv_domain = _extract_domain(cleaned[CONF_PROCESS_VALUE_ENTITY])
+            sp_domain = _extract_domain(cleaned[CONF_SETPOINT_ENTITY])
+            output_domain = _extract_domain(cleaned[CONF_OUTPUT_ENTITY])
+            grid_domain = _extract_domain(cleaned[CONF_GRID_POWER_ENTITY])
+
+            if pv_domain not in _PV_DOMAINS:
+                errors[CONF_PROCESS_VALUE_ENTITY] = "invalid_pv_domain"
+            if sp_domain not in _SETPOINT_DOMAINS:
+                errors[CONF_SETPOINT_ENTITY] = "invalid_setpoint_domain"
+            if output_domain not in _OUTPUT_DOMAINS:
+                errors[CONF_OUTPUT_ENTITY] = "invalid_output_domain"
+            if grid_domain not in _GRID_DOMAINS:
+                errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
+
+            if errors:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=self._build_schema(defaults),
+                    errors=errors,
+                )
 
             return self.async_create_entry(title="", data={**preserved, **cleaned})
 

@@ -73,6 +73,8 @@ from .pid import PID, PIDConfig
 
 _LOGGER = logging.getLogger(__name__)
 
+_OUTPUT_DOMAINS = {"number", "input_number"}
+
 
 @dataclass
 class FlowState:
@@ -90,12 +92,18 @@ class FlowState:
     manual_sp_display_value: float | None
 
 
-def _state_to_float(state) -> float | None:
+def _state_to_float(state, entity_id: str | None = None) -> float | None:
     if state is None:
         return None
     try:
         return float(state.state)
-    except Exception:
+    except (TypeError, ValueError) as err:
+        _LOGGER.warning(
+            "Could not convert state for %s to float (raw=%s): %s",
+            entity_id or "unknown entity",
+            getattr(state, "state", state),
+            err,
+        )
         return None
 
 
@@ -192,25 +200,31 @@ def _get_limiter_type(entry: ConfigEntry) -> str:
     return DEFAULT_GRID_LIMITER_TYPE
 
 
-async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> None:
+async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> bool:
     value = round(value, 1)
-    domain = entity_id.split(".", 1)[0]
+    domain = _get_domain(entity_id)
 
-    if domain == "number":
-        await hass.services.async_call("number", "set_value", {"entity_id": entity_id, "value": value}, blocking=False)
-        return
+    if domain not in _OUTPUT_DOMAINS:
+        _LOGGER.warning("Unsupported output entity domain '%s' for %s. Use number.* or input_number.*", domain, entity_id)
+        return False
 
-    if domain == "input_number":
-        await hass.services.async_call(
-            "input_number", "set_value", {"entity_id": entity_id, "value": value}, blocking=False
-        )
-        return
+    try:
+        await hass.services.async_call(domain, "set_value", {"entity_id": entity_id, "value": value}, blocking=True)
+    except Exception as err:
+        _LOGGER.warning("Failed to set output %s: %s", entity_id, err)
+        return False
 
-    _LOGGER.warning("Unsupported output entity domain '%s' for %s. Use number.* or input_number.*", domain, entity_id)
+    return True
 
 
 def _get_entity_id(entry: ConfigEntry, key: str) -> str | None:
     return entry.options.get(key) or entry.data.get(key)
+
+
+def _get_domain(entity_id: str | None) -> str | None:
+    if not entity_id or "." not in entity_id:
+        return None
+    return entity_id.split(".", 1)[0]
 
 
 class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
@@ -258,11 +272,13 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             entry.options.get(CONF_MANUAL_OUT_VALUE, DEFAULT_MANUAL_OUT_VALUE), DEFAULT_MANUAL_OUT_VALUE
         )
         self._previous_runtime_mode = self._runtime_mode
+        self._invalid_output_reported = False
+        self._output_write_failed_reported = False
 
     def _get_normal_setpoint_value(self) -> float | None:
         """Return the current external setpoint with inversion applied (no limiter)."""
         sp_ent = _get_entity_id(self.entry, CONF_SETPOINT_ENTITY)
-        sp = _state_to_float(self.hass.states.get(sp_ent)) if sp_ent else None
+        sp = _state_to_float(self.hass.states.get(sp_ent), sp_ent) if sp_ent else None
         if sp is not None and self.entry.options.get(CONF_INVERT_SP, DEFAULT_INVERT_SP):
             sp = -sp
         return sp
@@ -320,6 +336,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         prev_pv_for_pid = self._last_pv_for_pid
         prev_runtime_mode = self._previous_runtime_mode
         prev_manual_sp_value = self._manual_sp_value
+        output_write_failed = False
 
         enabled = self.entry.options.get(CONF_ENABLED, DEFAULT_ENABLED)
         min_output, max_output = _get_pid_limits_from_options(self.entry.options)
@@ -373,8 +390,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         out_ent = _get_entity_id(self.entry, CONF_OUTPUT_ENTITY)
         grid_ent = _get_entity_id(self.entry, CONF_GRID_POWER_ENTITY)
 
-        pv = _state_to_float(self.hass.states.get(pv_ent)) if pv_ent else None
-        grid_power = _state_to_float(self.hass.states.get(grid_ent)) if grid_ent else None
+        pv = _state_to_float(self.hass.states.get(pv_ent), pv_ent) if pv_ent else None
+        grid_power = _state_to_float(self.hass.states.get(grid_ent), grid_ent) if grid_ent else None
 
         if pv is not None and invert_pv:
             pv = -pv
@@ -428,12 +445,51 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 self._manual_out_value,
             )
 
+        def _apply_output_status(base_status: str) -> str:
+            nonlocal output_write_failed
+            if output_write_failed:
+                if not self._output_write_failed_reported:
+                    _LOGGER.warning(
+                        "Failed to write output for %s; controller status set to output_write_failed",
+                        self.entry.entry_id,
+                    )
+                    self._output_write_failed_reported = True
+                return "output_write_failed"
+            self._output_write_failed_reported = False
+            return base_status
+
+        out_domain = _get_domain(out_ent)
+        if out_ent and out_domain not in _OUTPUT_DOMAINS:
+            if not self._invalid_output_reported:
+                _LOGGER.warning(
+                    "Unsupported output entity domain '%s' for %s. Use number.* or input_number.*",
+                    out_domain,
+                    out_ent,
+                )
+                self._invalid_output_reported = True
+            self._previous_runtime_mode = runtime_mode
+            _log_mode_change()
+            return FlowState(
+                pv=pv,
+                sp=sp,
+                grid_power=grid_power,
+                out=None,
+                error=None,
+                enabled=enabled,
+                status="invalid_output",
+                limiter_state=self._limiter_state,
+                runtime_mode=runtime_mode,
+                manual_sp_value=self._manual_sp_value,
+                manual_out_value=self._manual_out_value,
+                manual_sp_display_value=manual_sp_display_value,
+            )
+
         if not enabled:
             self.pid.reset()
             self._limiter_state = GRID_LIMITER_STATE_NORMAL
             safe_output = min_output
             if out_ent:
-                await _set_output(self.hass, out_ent, safe_output)
+                output_write_failed = not await _set_output(self.hass, out_ent, safe_output)
             self._last_output = safe_output
             self._last_pv_for_pid = None
             self._last_sp_for_pid = None
@@ -447,7 +503,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 out=safe_output,
                 error=None,
                 enabled=False,
-                status="disabled",
+                status=_apply_output_status("disabled"),
                 limiter_state=GRID_LIMITER_STATE_NORMAL,
                 runtime_mode=runtime_mode,
                 manual_sp_value=self._manual_sp_value,
@@ -496,7 +552,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         if runtime_mode == RUNTIME_MODE_HOLD:
             held_output = self._last_output if self._last_output is not None else min_output
             if out_ent:
-                await _set_output(self.hass, out_ent, held_output)
+                output_write_failed = not await _set_output(self.hass, out_ent, held_output)
             self._limiter_state = GRID_LIMITER_STATE_NORMAL
             self._manual_out_value = held_output
             self._last_output = held_output
@@ -509,7 +565,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 out=held_output,
                 error=None,
                 enabled=True,
-                status="hold",
+                status=_apply_output_status("hold"),
                 limiter_state=self._limiter_state,
                 runtime_mode=runtime_mode,
                 manual_sp_value=self._manual_sp_value,
@@ -524,7 +580,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 else:
                     self._manual_out_value = _coerce_float(self._manual_out_value, DEFAULT_MANUAL_OUT_VALUE)
             if out_ent:
-                await _set_output(self.hass, out_ent, self._manual_out_value)
+                output_write_failed = not await _set_output(self.hass, out_ent, self._manual_out_value)
             self._last_output = self._manual_out_value
             self._limiter_state = GRID_LIMITER_STATE_NORMAL
             self._previous_runtime_mode = runtime_mode
@@ -536,7 +592,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 out=self._manual_out_value,
                 error=None,
                 enabled=True,
-                status="manual_out",
+                status=_apply_output_status("manual_out"),
                 limiter_state=self._limiter_state,
                 runtime_mode=runtime_mode,
                 manual_sp_value=self._manual_sp_value,
@@ -602,7 +658,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         )
 
         if out_ent:
-            await _set_output(self.hass, out_ent, out)
+            output_write_failed = not await _set_output(self.hass, out_ent, out)
         else:
             _LOGGER.warning("No output entity configured.")
 
@@ -621,7 +677,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             out=out,
             error=err,
             enabled=True,
-            status=status,
+            status=_apply_output_status(status),
             limiter_state=new_limiter_state,
             runtime_mode=runtime_mode,
             manual_sp_value=self._manual_sp_value,

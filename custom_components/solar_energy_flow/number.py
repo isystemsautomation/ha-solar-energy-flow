@@ -52,6 +52,8 @@ from .const import (
     CONSUMER_DEVICE_SUFFIX,
     CONSUMER_ID,
     CONSUMER_NAME,
+    CONSUMER_DEFAULT_START_DELAY_S,
+    CONSUMER_DEFAULT_STOP_DELAY_S,
     CONSUMER_MIN_POWER_W,
     CONSUMER_MAX_POWER_W,
     CONSUMER_POWER_TARGET_ENTITY_ID,
@@ -369,7 +371,7 @@ class SolarEnergyFlowConsumerDelayNumber(RestoreNumber):
             manufacturer="Solar Energy Flow",
             model="Energy Divider Consumer",
         )
-        self._default_value = 60.0 if is_start else 300.0
+        self._default_value = CONSUMER_DEFAULT_START_DELAY_S if is_start else CONSUMER_DEFAULT_STOP_DELAY_S
         self._current_value: float = self._default_value
 
     async def async_added_to_hass(self) -> None:

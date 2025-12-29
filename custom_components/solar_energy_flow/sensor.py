@@ -331,7 +331,7 @@ class ConsumerCommandedPowerSensor(_BaseConsumerRuntimeSensor):
     _attr_native_unit_of_measurement = UnitOfPower.WATT
 
     def __init__(self, entry: ConfigEntry, consumer: dict) -> None:
-        super().__init__(entry, consumer, "Commanded power", "cmd_power")
+        super().__init__(entry, consumer, "Power command", "cmd_power")
 
     @property
     def native_value(self):

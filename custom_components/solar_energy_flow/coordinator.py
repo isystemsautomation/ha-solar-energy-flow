@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Mapping, Any, Tuple
@@ -10,6 +11,7 @@ from typing import Mapping, Any, Tuple
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -87,6 +89,22 @@ from .const import (
     RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
+    CONF_CONSUMERS,
+    CONSUMER_DEFAULT_START_DELAY_S,
+    CONSUMER_DEFAULT_STOP_DELAY_S,
+    CONSUMER_ID,
+    CONSUMER_MIN_POWER_W,
+    CONSUMER_POWER_TARGET_ENTITY_ID,
+    CONSUMER_TYPE,
+    CONSUMER_TYPE_CONTROLLED,
+)
+from .consumer_bindings import get_consumer_binding
+from .helpers import (
+    RUNTIME_FIELD_CMD_W,
+    RUNTIME_FIELD_START_TIMER_S,
+    RUNTIME_FIELD_STOP_TIMER_S,
+    async_dispatch_consumer_runtime_update,
+    get_consumer_runtime,
 )
 from .pid import PID, PIDConfig, PIDStepResult
 
@@ -102,6 +120,8 @@ class FlowState:
     grid_power: float | None
     out: float | None
     output_pre_rate_limit: float | None
+    pid_pct: float | None
+    delta_w: float | None
     error: float | None
     enabled: bool
     status: str
@@ -382,6 +402,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._last_output_pct: float | None = None
         self._last_pv_pct: float | None = None
         self._last_sp_pct: float | None = None
+        self._consumer_power_entities: dict[str, str | None] = {}
+        self._last_consumer_update = time.monotonic()
         manual_sp_opt = entry.options.get(CONF_MANUAL_SP_VALUE)
         self._manual_sp_value: float | None = None
         self._manual_sp_initialized = False
@@ -450,6 +472,128 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         if span <= 0:
             return 0.0
         return deadband_raw * 100.0 / span
+
+    def _get_consumer_number_entity_id(self, consumer_id: str, suffix: str) -> str | None:
+        unique_id = f"{DOMAIN}_{self.entry.entry_id}_{consumer_id}_{suffix}"
+        entity_registry = er.async_get(self.hass)
+        return entity_registry.async_get_entity_id("number", DOMAIN, unique_id)
+
+    def _read_number_entity_value(self, entity_id: str | None, default: float) -> float:
+        if not entity_id:
+            return default
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return default
+        try:
+            return float(state.state)
+        except (TypeError, ValueError):
+            return default
+
+    def _get_consumer_delay_seconds(self, consumer_id: str, is_start: bool) -> float:
+        suffix = "start_delay_s" if is_start else "stop_delay_s"
+        default = CONSUMER_DEFAULT_START_DELAY_S if is_start else CONSUMER_DEFAULT_STOP_DELAY_S
+        entity_id = self._get_consumer_number_entity_id(consumer_id, suffix)
+        return self._read_number_entity_value(entity_id, default)
+
+    def _consumer_available(self, consumer: Mapping[str, Any]) -> bool:
+        power_target = consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID)
+        if power_target:
+            state = self.hass.states.get(power_target)
+            if state is None or state.state in ("unavailable", "unknown"):
+                return False
+        return True
+
+    def _consumer_enabled(self, consumer: Mapping[str, Any]) -> bool:
+        binding = get_consumer_binding(self.hass, self.entry.entry_id, consumer)
+        enabled_state = binding.get_effective_enabled(self.hass)
+        if enabled_state is None:
+            return True
+        return bool(enabled_state)
+
+    def _compute_dt(self) -> float:
+        now = time.monotonic()
+        dt = max(0.0, now - self._last_consumer_update)
+        self._last_consumer_update = now
+        return dt
+
+    async def _async_command_consumer_power(self, consumer: Mapping[str, Any], value: float) -> None:
+        consumer_id = consumer.get(CONSUMER_ID)
+        if consumer_id is None:
+            return
+
+        if consumer_id not in self._consumer_power_entities:
+            self._consumer_power_entities[consumer_id] = self._get_consumer_number_entity_id(consumer_id, "power")
+        power_entity_id = self._consumer_power_entities.get(consumer_id)
+
+        if power_entity_id:
+            try:
+                await self.hass.services.async_call(
+                    "number", "set_value", {"entity_id": power_entity_id, "value": value}, blocking=True
+                )
+                return
+            except (HomeAssistantError, asyncio.TimeoutError, ValueError) as err:
+                _LOGGER.warning(
+                    "Failed to update consumer power entity %s for %s: %s", power_entity_id, consumer_id, err
+                )
+
+        binding = get_consumer_binding(self.hass, self.entry.entry_id, consumer)
+        binding.set_desired_power(value)
+        await binding.async_push_power(self.hass)
+
+    async def _async_update_controlled_consumers(
+        self, consumers: list[Mapping[str, Any]], delta_w: float | None, dt: float
+    ) -> None:
+        for consumer in consumers:
+            if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_CONTROLLED:
+                continue
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W, 0.0))
+            start_timer = float(runtime.get(RUNTIME_FIELD_START_TIMER_S, 0.0))
+            stop_timer = float(runtime.get(RUNTIME_FIELD_STOP_TIMER_S, 0.0))
+            min_power = float(consumer.get(CONSUMER_MIN_POWER_W, 0.0))
+            start_delay = self._get_consumer_delay_seconds(consumer_id, True)
+            stop_delay = self._get_consumer_delay_seconds(consumer_id, False)
+
+            enabled = self._consumer_enabled(consumer)
+            available = self._consumer_available(consumer)
+
+            prev_cmd = cmd_w
+
+            if cmd_w <= 0.0:
+                stop_timer = 0.0
+                if enabled and available and delta_w is not None and delta_w >= min_power:
+                    start_timer += dt
+                else:
+                    start_timer = 0.0
+                if start_timer >= start_delay and start_delay >= 0.0:
+                    cmd_w = min_power
+                    start_timer = 0.0
+                    stop_timer = 0.0
+            else:
+                start_timer = 0.0
+                if not enabled or not available:
+                    cmd_w = 0.0
+                    stop_timer = 0.0
+                else:
+                    if delta_w is None or delta_w < 0.0:
+                        stop_timer += dt
+                    else:
+                        stop_timer = 0.0
+                    if stop_timer >= stop_delay and stop_delay >= 0.0:
+                        cmd_w = 0.0
+                        stop_timer = 0.0
+                        start_timer = 0.0
+
+            runtime[RUNTIME_FIELD_CMD_W] = cmd_w
+            runtime[RUNTIME_FIELD_START_TIMER_S] = start_timer
+            runtime[RUNTIME_FIELD_STOP_TIMER_S] = stop_timer
+            async_dispatch_consumer_runtime_update(self.hass, self.entry.entry_id, consumer_id)
+
+            if not math.isclose(prev_cmd, cmd_w, abs_tol=1e-6):
+                await self._async_command_consumer_power(consumer, cmd_w)
 
     def _build_runtime_options(self) -> RuntimeOptions:
         enabled = self.entry.options.get(CONF_ENABLED, DEFAULT_ENABLED)
@@ -1008,11 +1152,20 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         prev_pv_for_pid = self._last_pv_pct
         prev_runtime_mode = self._previous_runtime_mode
         prev_manual_sp_value = self._manual_sp_value
+        dt = self._compute_dt()
+        consumers = self.entry.options.get(CONF_CONSUMERS, [])
+        if not isinstance(consumers, list):
+            consumers = []
 
         options = self._build_runtime_options()
         inputs = self._read_inputs(options)
         setpoint_context = self._compute_setpoint_context(options, inputs, prev_runtime_mode, prev_manual_sp_value)
         limiter_result = self._apply_grid_limiter(options, inputs, setpoint_context, prev_limiter_state)
+        delta_w = (
+            limiter_result.pv_for_pid - limiter_result.sp_for_pid
+            if limiter_result.pv_for_pid is not None and limiter_result.sp_for_pid is not None
+            else None
+        )
 
         out_ent = _get_entity_id(self.entry, CONF_OUTPUT_ENTITY)
         out_domain = _get_domain(out_ent)
@@ -1026,12 +1179,15 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 self._invalid_output_reported = True
             self._previous_runtime_mode = setpoint_context.runtime_mode
             self._log_runtime_mode_change(prev_runtime_mode, setpoint_context.runtime_mode, prev_manual_sp_value, setpoint_context.manual_sp_display_value)
+            await self._async_update_controlled_consumers(consumers, delta_w, dt)
             return FlowState(
                 pv=limiter_result.pv_for_pid,
                 sp=limiter_result.sp_for_pid,
                 grid_power=inputs.grid_power,
                 out=None,
                 output_pre_rate_limit=None,
+                pid_pct=self._last_output_pct,
+                delta_w=delta_w,
                 error=None,
                 enabled=options.enabled,
                 status="invalid_output",
@@ -1058,6 +1214,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         write_result = await self._maybe_write_output(out_ent, output_plan.output, options)
         final_status = self._apply_output_status(output_plan.status, write_result.write_failed)
+        pid_pct = self._last_output_pct
+
+        await self._async_update_controlled_consumers(consumers, delta_w, dt)
 
         return FlowState(
             pv=limiter_result.pv_for_pid,
@@ -1065,6 +1224,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             grid_power=inputs.grid_power,
             out=self._last_output_raw,
             output_pre_rate_limit=output_plan.output_pre_rate_limit,
+            pid_pct=pid_pct,
+            delta_w=delta_w,
             error=output_plan.error,
             enabled=options.enabled,
             status=final_status,

@@ -294,13 +294,7 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             return self._default
 
     def _runtime_mode(self) -> str:
-        data = getattr(self.coordinator, "data", None)
-        if data and getattr(data, "runtime_mode", None):
-            return data.runtime_mode
-        runtime_mode = getattr(self.coordinator, "_runtime_mode", None)
-        if runtime_mode:
-            return runtime_mode
-        return self._entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        return self.coordinator.get_runtime_mode()
 
     def _mirror_value(self) -> float:
         data = getattr(self.coordinator, "data", None)
@@ -317,6 +311,10 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             return self._default
 
     async def _async_snap_back(self) -> None:
+        if self._option_key == CONF_MANUAL_SP_VALUE:
+            await self.coordinator.async_snap_back_manual_sp()
+        else:
+            await self.coordinator.async_snap_back_manual_out()
         self.async_write_ha_state()
 
     async def async_set_native_value(self, value: float) -> None:

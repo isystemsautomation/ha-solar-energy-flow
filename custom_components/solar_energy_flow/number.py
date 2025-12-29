@@ -285,13 +285,13 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             if self._option_key == CONF_MANUAL_SP_VALUE:
                 display_value = getattr(data, "manual_sp_display_value", None)
                 if display_value is not None:
-                    return display_value
-                return data.manual_sp_value
-            return data.manual_out_value
+                    return round(display_value, 1)
+                return round(data.manual_sp_value, 1)
+            return round(data.manual_out_value, 1)
         try:
-            return float(self._entry.options.get(self._option_key, self._default))
+            return round(float(self._entry.options.get(self._option_key, self._default)), 1)
         except (TypeError, ValueError):
-            return self._default
+            return round(self._default, 1)
 
     def _runtime_mode(self) -> str:
         return self.coordinator.get_runtime_mode()
@@ -302,13 +302,13 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             if self._option_key == CONF_MANUAL_SP_VALUE:
                 display_value = getattr(data, "manual_sp_display_value", None)
                 if display_value is not None:
-                    return display_value
-                return data.manual_sp_value
-            return data.manual_out_value
+                    return round(display_value, 1)
+                return round(data.manual_sp_value, 1)
+            return round(data.manual_out_value, 1)
         try:
-            return float(self._entry.options.get(self._option_key, self._default))
+            return round(float(self._entry.options.get(self._option_key, self._default)), 1)
         except (TypeError, ValueError):
-            return self._default
+            return round(self._default, 1)
 
     async def _async_snap_back(self) -> None:
         if self._option_key == CONF_MANUAL_SP_VALUE:

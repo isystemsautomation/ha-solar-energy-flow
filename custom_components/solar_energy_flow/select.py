@@ -105,10 +105,6 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
         options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
         options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
         options.setdefault(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
-        options.setdefault(CONF_MANUAL_SP_VALUE, getattr(self.coordinator, "_manual_sp_value", DEFAULT_MANUAL_SP_VALUE))
-        options.setdefault(
-            CONF_MANUAL_OUT_VALUE, getattr(self.coordinator, "_manual_out_value", DEFAULT_MANUAL_OUT_VALUE)
-        )
 
         if self._option_key == CONF_GRID_LIMITER_TYPE and option not in (
             GRID_LIMITER_TYPE_IMPORT,

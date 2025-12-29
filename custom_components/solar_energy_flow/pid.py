@@ -38,7 +38,7 @@ class PID:
         self._prev_error: float | None = None
         self._kaw = self._compute_kaw(cfg.kp)
         if entry_id:
-            _LOGGER.warning("PIDController CREATED entry_id=%s", entry_id)
+            _LOGGER.debug("PIDController CREATED entry_id=%s", entry_id)
 
     def update_config(self, cfg: PIDConfig) -> None:
         self.cfg = cfg
@@ -53,7 +53,7 @@ class PID:
     def apply_options(self, cfg: PIDConfig) -> None:
         """Apply new tuning without resetting accumulated state."""
 
-        _LOGGER.warning("PIDController APPLY runtime options; no reset")
+        _LOGGER.debug("PIDController APPLY runtime options; no reset")
         self.update_config(cfg)
 
     def _compute_kaw(self, kp: float) -> float:

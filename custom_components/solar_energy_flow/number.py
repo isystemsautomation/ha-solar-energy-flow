@@ -283,6 +283,9 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
         data = getattr(self.coordinator, "data", None)
         if data is not None:
             if self._option_key == CONF_MANUAL_SP_VALUE:
+                display_value = getattr(data, "manual_sp_display_value", None)
+                if display_value is not None:
+                    return display_value
                 return data.manual_sp_value
             return data.manual_out_value
         try:
@@ -303,6 +306,9 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
         data = getattr(self.coordinator, "data", None)
         if data is not None:
             if self._option_key == CONF_MANUAL_SP_VALUE:
+                display_value = getattr(data, "manual_sp_display_value", None)
+                if display_value is not None:
+                    return display_value
                 return data.manual_sp_value
             return data.manual_out_value
         try:
@@ -313,10 +319,11 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
     async def _async_snap_back(self) -> None:
         mirror = self._mirror_value()
         if self._option_key == CONF_MANUAL_SP_VALUE:
-            self.coordinator._manual_sp_value = mirror
+            # Do not let forbidden edits overwrite the stored manual SP.
+            self.async_write_ha_state()
         else:
             self.coordinator._manual_out_value = mirror
-        self.async_write_ha_state()
+            self.async_write_ha_state()
 
     async def async_set_native_value(self, value: float) -> None:
         runtime_mode = self._runtime_mode()

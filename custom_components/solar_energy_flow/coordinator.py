@@ -578,6 +578,21 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._manual_out_value,
         )
 
+    def get_runtime_mode(self) -> str:
+        """Return the current runtime mode from the latest data or internal state."""
+        data_runtime_mode = getattr(getattr(self, "data", None), "runtime_mode", None)
+        if data_runtime_mode:
+            return data_runtime_mode
+        runtime_mode = self._runtime_mode or self.entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        if runtime_mode not in (
+            RUNTIME_MODE_AUTO_SP,
+            RUNTIME_MODE_MANUAL_SP,
+            RUNTIME_MODE_HOLD,
+            RUNTIME_MODE_MANUAL_OUT,
+        ):
+            return DEFAULT_RUNTIME_MODE
+        return runtime_mode
+
     def get_manual_out_value(self) -> float:
         return self._manual_out_value
 
@@ -598,6 +613,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
     async def async_snap_back_manual_sp(self) -> None:
         await self.async_request_refresh()
+
+    async def async_reset_manual_sp(self) -> None:
+        self._manual_sp_value = None
+        self._manual_sp_initialized = False
 
     async def _maybe_write_output(
         self,

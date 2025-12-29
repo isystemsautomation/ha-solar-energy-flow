@@ -116,7 +116,7 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
             GRID_LIMITER_TYPE_EXPORT,
         ):
             option = DEFAULT_GRID_LIMITER_TYPE
-        previous_runtime_mode = self.coordinator._runtime_mode
+        previous_runtime_mode = self.coordinator.get_runtime_mode()
 
         options[self._option_key] = option
 
@@ -130,8 +130,7 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
                 options[CONF_MANUAL_SP_VALUE] = manual_sp
             else:
                 options.pop(CONF_MANUAL_SP_VALUE, None)
-                self.coordinator._manual_sp_value = None
-                self.coordinator._manual_sp_initialized = False
+                await self.coordinator.async_reset_manual_sp()
 
         self.coordinator.apply_options(options)
         self.hass.config_entries.async_update_entry(self._entry, options=options)

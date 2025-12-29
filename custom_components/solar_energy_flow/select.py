@@ -4,6 +4,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -48,6 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "Grid limiter type",
                 [GRID_LIMITER_TYPE_IMPORT, GRID_LIMITER_TYPE_EXPORT],
                 DEFAULT_GRID_LIMITER_TYPE,
+                EntityCategory.CONFIG,
             ),
             SolarEnergyFlowSelect(
                 coordinator,
@@ -56,6 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "Runtime mode",
                 [RUNTIME_MODE_AUTO_SP, RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD, RUNTIME_MODE_MANUAL_OUT],
                 DEFAULT_RUNTIME_MODE,
+                None,
             ),
         ]
     )
@@ -72,6 +75,7 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
         name: str,
         options: list[str],
         default: str,
+        entity_category: EntityCategory | None,
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry
@@ -80,6 +84,7 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
         self._attr_name = name
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{option_key}"
         self._attr_options = options
+        self._attr_entity_category = entity_category
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,

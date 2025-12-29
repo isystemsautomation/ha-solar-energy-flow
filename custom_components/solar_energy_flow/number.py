@@ -112,7 +112,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             10.0,
             0.0,
             20000.0,
-            None,
+            EntityCategory.CONFIG,
         ),
         SolarEnergyFlowNumber(
             coordinator,
@@ -123,7 +123,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             10.0,
             0.0,
             20000.0,
-            None,
+            EntityCategory.CONFIG,
         ),
         SolarEnergyFlowNumber(
             coordinator,

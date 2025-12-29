@@ -32,7 +32,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class SolarEnergyFlowEnabledSwitch(CoordinatorEntity, SwitchEntity):
-    _attr_entity_category = EntityCategory.CONFIG
     _attr_has_entity_name = True
     _attr_name = "Enabled"
 
@@ -105,6 +104,7 @@ class SolarEnergyFlowRateLimiterSwitch(CoordinatorEntity, SwitchEntity):
 class SolarEnergyFlowGridLimiterSwitch(CoordinatorEntity, SwitchEntity):
     _attr_has_entity_name = True
     _attr_name = "Grid limiter enabled"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)

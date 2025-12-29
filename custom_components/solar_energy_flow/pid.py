@@ -17,6 +17,16 @@ class PIDConfig:
     max_output: float
 
 
+@dataclass
+class PIDStepResult:
+    output: float
+    error: float
+    p_term: float
+    i_term: float
+    d_term: float
+    output_pre_rate_limit: float
+
+
 class PID:
     """Simple PID with anti-windup via tracking and derivative on measurement."""
 
@@ -57,8 +67,8 @@ class PID:
         *,
         rate_limiter_enabled: bool,
         rate_limit: float,
-    ) -> tuple[float, float]:
-        """Return (output, error)."""
+    ) -> PIDStepResult:
+        """Return the latest PID step details."""
         now = time.monotonic()
         if self._prev_t is None:
             dt = 0.0
@@ -90,7 +100,14 @@ class PID:
         self._prev_pv = pv
         self._prev_t = now
         self._prev_error = error
-        return u_out, error
+        return PIDStepResult(
+            output=u_out,
+            error=error,
+            p_term=p,
+            i_term=i,
+            d_term=d,
+            output_pre_rate_limit=u_sat,
+        )
 
     def bumpless_transfer(self, current_output: float, error: float, pv: float | None) -> None:
         """Adjust integral to avoid output jumps when mode/setpoint changes."""

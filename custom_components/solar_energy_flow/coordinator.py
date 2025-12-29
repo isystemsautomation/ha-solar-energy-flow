@@ -69,7 +69,7 @@ from .const import (
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
 )
-from .pid import PID, PIDConfig
+from .pid import PID, PIDConfig, PIDStepResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ class FlowState:
     sp: float | None
     grid_power: float | None
     out: float | None
+    output_pre_rate_limit: float | None
     error: float | None
     enabled: bool
     status: str
@@ -90,6 +91,9 @@ class FlowState:
     manual_sp_value: float | None
     manual_out_value: float
     manual_sp_display_value: float | None
+    p_term: float | None
+    i_term: float | None
+    d_term: float | None
 
 
 def _state_to_float(state, entity_id: str | None = None) -> float | None:
@@ -431,6 +435,41 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         elif runtime_mode == RUNTIME_MODE_MANUAL_SP and self._manual_sp_value is None:
             manual_sp_display_value = sp
 
+        pv_for_pid: float | None = pv
+        sp_for_pid: float | None = self._manual_sp_value if runtime_mode == RUNTIME_MODE_MANUAL_SP else sp
+        status = "running"
+
+        new_limiter_state = GRID_LIMITER_STATE_NORMAL
+        limiter_active = limiter_enabled and grid_power is not None
+        if limiter_active:
+            if limiter_type == GRID_LIMITER_TYPE_IMPORT:
+                if self._limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
+                    if grid_power < limiter_limit_w - limiter_deadband_w:
+                        new_limiter_state = GRID_LIMITER_STATE_NORMAL
+                    else:
+                        new_limiter_state = GRID_LIMITER_STATE_LIMITING_IMPORT
+                elif grid_power > limiter_limit_w + limiter_deadband_w:
+                    new_limiter_state = GRID_LIMITER_STATE_LIMITING_IMPORT
+            elif limiter_type == GRID_LIMITER_TYPE_EXPORT:
+                if self._limiter_state == GRID_LIMITER_STATE_LIMITING_EXPORT:
+                    if grid_power > -(limiter_limit_w - limiter_deadband_w):
+                        new_limiter_state = GRID_LIMITER_STATE_NORMAL
+                    else:
+                        new_limiter_state = GRID_LIMITER_STATE_LIMITING_EXPORT
+                elif grid_power < -(limiter_limit_w + limiter_deadband_w):
+                    new_limiter_state = GRID_LIMITER_STATE_LIMITING_EXPORT
+
+        if limiter_active and new_limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
+            pv_for_pid = grid_power
+            sp_for_pid = limiter_limit_w
+            status = GRID_LIMITER_STATE_LIMITING_IMPORT
+        elif limiter_active and new_limiter_state == GRID_LIMITER_STATE_LIMITING_EXPORT:
+            pv_for_pid = grid_power
+            sp_for_pid = -limiter_limit_w
+            status = GRID_LIMITER_STATE_LIMITING_EXPORT
+        elif limiter_enabled and grid_power is None:
+            status = "grid_power_unavailable"
+
         def _log_mode_change() -> None:
             if not mode_changed:
                 return
@@ -470,10 +509,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._previous_runtime_mode = runtime_mode
             _log_mode_change()
             return FlowState(
-                pv=pv,
-                sp=sp,
+                pv=pv_for_pid,
+                sp=sp_for_pid,
                 grid_power=grid_power,
                 out=None,
+                output_pre_rate_limit=None,
                 error=None,
                 enabled=enabled,
                 status="invalid_output",
@@ -482,6 +522,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 manual_sp_value=self._manual_sp_value,
                 manual_out_value=self._manual_out_value,
                 manual_sp_display_value=manual_sp_display_value,
+                p_term=None,
+                i_term=None,
+                d_term=None,
             )
 
         if not enabled:
@@ -497,10 +540,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._previous_runtime_mode = runtime_mode
             _log_mode_change()
             return FlowState(
-                pv=pv,
-                sp=sp,
+                pv=pv_for_pid,
+                sp=sp_for_pid,
                 grid_power=grid_power,
                 out=safe_output,
+                output_pre_rate_limit=safe_output,
                 error=None,
                 enabled=False,
                 status=_apply_output_status("disabled"),
@@ -509,45 +553,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 manual_sp_value=self._manual_sp_value,
                 manual_out_value=self._manual_out_value,
                 manual_sp_display_value=manual_sp_display_value,
+                p_term=None,
+                i_term=None,
+                d_term=None,
             )
-
-        pv_for_pid: float | None
-        sp_for_pid: float | None
-        status = "running"
-
-        new_limiter_state = GRID_LIMITER_STATE_NORMAL
-        limiter_active = limiter_enabled and grid_power is not None
-        if limiter_active:
-            if limiter_type == GRID_LIMITER_TYPE_IMPORT:
-                if self._limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
-                    if grid_power < limiter_limit_w - limiter_deadband_w:
-                        new_limiter_state = GRID_LIMITER_STATE_NORMAL
-                    else:
-                        new_limiter_state = GRID_LIMITER_STATE_LIMITING_IMPORT
-                elif grid_power > limiter_limit_w + limiter_deadband_w:
-                    new_limiter_state = GRID_LIMITER_STATE_LIMITING_IMPORT
-            elif limiter_type == GRID_LIMITER_TYPE_EXPORT:
-                if self._limiter_state == GRID_LIMITER_STATE_LIMITING_EXPORT:
-                    if grid_power > -(limiter_limit_w - limiter_deadband_w):
-                        new_limiter_state = GRID_LIMITER_STATE_NORMAL
-                    else:
-                        new_limiter_state = GRID_LIMITER_STATE_LIMITING_EXPORT
-                elif grid_power < -(limiter_limit_w + limiter_deadband_w):
-                    new_limiter_state = GRID_LIMITER_STATE_LIMITING_EXPORT
-
-        pv_for_pid = pv
-        sp_for_pid = self._manual_sp_value if runtime_mode == RUNTIME_MODE_MANUAL_SP else sp
-
-        if limiter_active and new_limiter_state == GRID_LIMITER_STATE_LIMITING_IMPORT:
-            pv_for_pid = grid_power
-            sp_for_pid = limiter_limit_w
-            status = GRID_LIMITER_STATE_LIMITING_IMPORT
-        elif limiter_active and new_limiter_state == GRID_LIMITER_STATE_LIMITING_EXPORT:
-            pv_for_pid = grid_power
-            sp_for_pid = -limiter_limit_w
-            status = GRID_LIMITER_STATE_LIMITING_EXPORT
-        elif limiter_enabled and grid_power is None:
-            status = "grid_power_unavailable"
 
         if runtime_mode == RUNTIME_MODE_HOLD:
             held_output = self._last_output if self._last_output is not None else min_output
@@ -559,10 +568,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._previous_runtime_mode = runtime_mode
             _log_mode_change()
             return FlowState(
-                pv=pv,
-                sp=sp,
+                pv=pv_for_pid,
+                sp=sp_for_pid,
                 grid_power=grid_power,
                 out=held_output,
+                output_pre_rate_limit=held_output,
                 error=None,
                 enabled=True,
                 status=_apply_output_status("hold"),
@@ -571,6 +581,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 manual_sp_value=self._manual_sp_value,
                 manual_out_value=self._manual_out_value,
                 manual_sp_display_value=manual_sp_display_value,
+                p_term=None,
+                i_term=None,
+                d_term=None,
             )
 
         if runtime_mode == RUNTIME_MODE_MANUAL_OUT:
@@ -586,10 +599,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._previous_runtime_mode = runtime_mode
             _log_mode_change()
             return FlowState(
-                pv=pv,
-                sp=sp,
+                pv=pv_for_pid,
+                sp=sp_for_pid,
                 grid_power=grid_power,
                 out=self._manual_out_value,
+                output_pre_rate_limit=self._manual_out_value,
                 error=None,
                 enabled=True,
                 status=_apply_output_status("manual_out"),
@@ -598,6 +612,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 manual_sp_value=self._manual_sp_value,
                 manual_out_value=self._manual_out_value,
                 manual_sp_display_value=manual_sp_display_value,
+                p_term=None,
+                i_term=None,
+                d_term=None,
             )
 
         if pv_for_pid is None or sp_for_pid is None:
@@ -609,10 +626,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._previous_runtime_mode = runtime_mode
             _log_mode_change()
             return FlowState(
-                pv=pv,
+                pv=pv_for_pid,
                 sp=sp_for_pid,
                 grid_power=grid_power,
                 out=None,
+                output_pre_rate_limit=None,
                 error=None,
                 enabled=True,
                 status="missing_input",
@@ -621,6 +639,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 manual_sp_value=self._manual_sp_value,
                 manual_out_value=self._manual_out_value,
                 manual_sp_display_value=manual_sp_display_value,
+                p_term=None,
+                i_term=None,
+                d_term=None,
             )
 
         error = sp_for_pid - pv_for_pid
@@ -649,7 +670,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         self._limiter_state = new_limiter_state
 
-        out, err = self.pid.step(
+        step_result: PIDStepResult = self.pid.step(
             pv=pv_for_pid,
             error=error,
             last_output=self._last_output,
@@ -658,15 +679,15 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         )
 
         if out_ent:
-            output_write_failed = not await _set_output(self.hass, out_ent, out)
+            output_write_failed = not await _set_output(self.hass, out_ent, step_result.output)
         else:
             _LOGGER.warning("No output entity configured.")
 
-        self._last_output = out
+        self._last_output = step_result.output
         self._last_pv_for_pid = pv_for_pid
         self._last_sp_for_pid = sp_for_pid
         if runtime_mode != RUNTIME_MODE_MANUAL_OUT:
-            self._manual_out_value = out
+            self._manual_out_value = step_result.output
         self._previous_runtime_mode = runtime_mode
         _log_mode_change()
 
@@ -674,8 +695,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             pv=pv_for_pid,
             sp=sp_for_pid,
             grid_power=grid_power,
-            out=out,
-            error=err,
+            out=step_result.output,
+            output_pre_rate_limit=step_result.output_pre_rate_limit,
+            error=step_result.error,
             enabled=True,
             status=_apply_output_status(status),
             limiter_state=new_limiter_state,
@@ -683,6 +705,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             manual_sp_value=self._manual_sp_value,
             manual_out_value=self._manual_out_value,
             manual_sp_display_value=manual_sp_display_value,
+            p_term=step_result.p_term,
+            i_term=step_result.i_term,
+            d_term=step_result.d_term,
         )
 
 # Manual test checklist:

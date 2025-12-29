@@ -3,7 +3,6 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Integration-41BDF5.svg)](https://www.home-assistant.io/)
 [![Version](https://img.shields.io/github/v/release/isystemsautomation/ha-solar-energy-flow?display_name=tag)](https://github.com/isystemsautomation/ha-solar-energy-flow/releases)
-[![License](https://img.shields.io/github/license/isystemsautomation/ha-solar-energy-flow)](LICENSE)
 [![Issues](https://img.shields.io/github/issues/isystemsautomation/ha-solar-energy-flow)](https://github.com/isystemsautomation/ha-solar-energy-flow/issues)
 
 A **PID-based control integration for Home Assistant** that regulates a numeric output entity based on a measured process value and a setpoint, with optional grid import/export limiting.
@@ -15,6 +14,8 @@ Designed for **energy flow control** scenarios such as inverter power limiting, 
 ## Features
 
 - PID controller (Kp / Ki / Kd)
+- **Internal 0–100% normalized control**
+- Percent-based PID tuning (device-independent)
 - Anti-windup with tracking
 - Derivative on measurement
 - Multiple runtime modes:
@@ -26,6 +27,38 @@ Designed for **energy flow control** scenarios such as inverter power limiting, 
 - Optional output rate limiting
 - Fully configurable from the Home Assistant UI
 - Uses `DataUpdateCoordinator`
+
+---
+
+## How the Controller Works (Important)
+
+Internally, the controller **normalizes all control signals to a 0–100% range**:
+
+- Process Value (PV) → 0–100%
+- Setpoint (SP) → 0–100%
+- PID Output → 0–100%
+
+This normalization is done using user-configured **minimum and maximum values** for each signal.
+
+The PID algorithm **always operates in percent**, while:
+- Sensors continue to display **raw, real-world values**
+- The output entity receives **scaled real-world values**
+
+This design provides:
+- Stable tuning across different devices
+- Predictable PID behavior
+- Independence from sensor units (W, A, V, %, etc.)
+
+---
+
+## PID Gains (Percent-Based Tuning)
+
+**Kp, Ki, and Kd are tuned in percent space.**
+
+What this means:
+- A PID output of **100%** represents the maximum configured output
+- PID gains are **independent of the physical units** of PV, SP, or output
+- Changing sensors or ranges does not require re-scaling PID gains
 
 ---
 
@@ -42,7 +75,7 @@ Designed for **energy flow control** scenarios such as inverter power limiting, 
 
 ## Initial Configuration
 
-During setup you must select the entities used by the controller.
+During setup you must select the entities used by the controller and define their operating ranges.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-flow/main/images/Configuration1.png" width="300">
@@ -90,9 +123,9 @@ Runtime controls allow switching modes and manually overriding behavior.
 
 | Mode | Description |
 |---|---|
-| **AUTO SP** | PID controls output using external setpoint |
-| **MANUAL SP** | User sets setpoint manually, PID remains active |
-| **MANUAL OUT** | User directly controls output |
+| **AUTO SP** | PID controls output using normalized percent setpoint |
+| **MANUAL SP** | User sets setpoint manually (raw units), PID remains active |
+| **MANUAL OUT** | User directly controls output (raw units) |
 | **HOLD** | Output frozen at last value |
 
 Mode transitions use **bumpless transfer** to avoid output jumps.
@@ -108,13 +141,13 @@ The integration exposes detailed runtime sensors for transparency and tuning.
 </p>
 
 ### Sensors
-- Effective SP
-- PV value
-- Output
+- Effective SP (raw units)
+- PV value (raw units)
+- Output (raw units)
 - Output (pre rate limit)
-- Error
-- Grid power
-- P / I / D terms
+- Error (percent domain)
+- Grid power (raw units)
+- P / I / D terms (percent domain)
 - Limiter state (diagnostic)
 - Status
 
@@ -129,20 +162,20 @@ All tuning and limiter parameters are available as number and switch entities.
 </p>
 
 ### PID & Limits
-- Kp, Ki, Kd
-- PID deadband
-- Min output
-- Max output
+- Kp, Ki, Kd (**percent-based tuning**)
+- PID deadband (percent)
+- Min output (raw units)
+- Max output (raw units)
 
 ### Grid Limiter
 - Grid limiter enabled
 - Grid limiter type (import / export)
-- Grid limiter limit
+- Grid limiter limit (raw units)
 - Grid limiter deadband
 
 ### Rate Limiter
 - Rate limiter enabled
-- Rate limit (points/s)
+- Rate limit (output units per second)
 
 ---
 

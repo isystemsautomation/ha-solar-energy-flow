@@ -400,6 +400,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._limiter_state = GRID_LIMITER_STATE_NORMAL
         self._last_output_raw: float | None = None
         self._last_output_pct: float | None = None
+        self.pid_output_pct: float | None = None
+        self.delta_w: float | None = None
         self._last_pv_pct: float | None = None
         self._last_sp_pct: float | None = None
         self._consumer_power_entities: dict[str, str | None] = {}
@@ -1159,13 +1161,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         options = self._build_runtime_options()
         inputs = self._read_inputs(options)
+        self.delta_w = None if inputs.pv is None or inputs.sp is None else inputs.pv - inputs.sp
         setpoint_context = self._compute_setpoint_context(options, inputs, prev_runtime_mode, prev_manual_sp_value)
         limiter_result = self._apply_grid_limiter(options, inputs, setpoint_context, prev_limiter_state)
-        delta_w = (
-            limiter_result.pv_for_pid - limiter_result.sp_for_pid
-            if limiter_result.pv_for_pid is not None and limiter_result.sp_for_pid is not None
-            else None
-        )
+        delta_w = self.delta_w
 
         out_ent = _get_entity_id(self.entry, CONF_OUTPUT_ENTITY)
         out_domain = _get_domain(out_ent)
@@ -1180,6 +1179,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._previous_runtime_mode = setpoint_context.runtime_mode
             self._log_runtime_mode_change(prev_runtime_mode, setpoint_context.runtime_mode, prev_manual_sp_value, setpoint_context.manual_sp_display_value)
             await self._async_update_controlled_consumers(consumers, delta_w, dt)
+            self.pid_output_pct = self._last_output_pct
             return FlowState(
                 pv=limiter_result.pv_for_pid,
                 sp=limiter_result.sp_for_pid,
@@ -1214,7 +1214,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         write_result = await self._maybe_write_output(out_ent, output_plan.output, options)
         final_status = self._apply_output_status(output_plan.status, write_result.write_failed)
-        pid_pct = self._last_output_pct
+        self.pid_output_pct = self._last_output_pct
+        pid_pct = self.pid_output_pct
 
         await self._async_update_controlled_consumers(consumers, delta_w, dt)
 

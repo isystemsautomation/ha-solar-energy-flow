@@ -3,7 +3,7 @@ from __future__ import annotations
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.const import UnitOfPower, UnitOfTime
+from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTime
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -11,6 +11,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .consumer_bindings import get_consumer_binding
 from .const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_CONSUMERS,
@@ -39,6 +40,9 @@ from .helpers import (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
+    consumers = entry.options.get(CONF_CONSUMERS, [])
+    if not isinstance(consumers, list):
+        consumers = []
     entities: list[SensorEntity] = [
         SolarEnergyFlowEffectiveSPSensor(coordinator, entry),
         SolarEnergyFlowPVValueSensor(coordinator, entry),
@@ -51,6 +55,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         SolarEnergyFlowDTermSensor(coordinator, entry),
         SolarEnergyFlowLimiterStateSensor(coordinator, entry),
         SolarEnergyFlowOutputPreRateLimitSensor(coordinator, entry),
+        EnergyDividerPIDOutputPctSensor(coordinator, entry),
+        EnergyDividerDeltaWSensor(coordinator, entry),
+        EnergyDividerConsumersSummarySensor(coordinator, entry, consumers),
     ]
 
     if CONF_BATTERY_SOC_ENTITY in entry.options:
@@ -60,8 +67,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     if battery_soc_entity:
         entities.append(BatterySOCSensor(entry, battery_soc_entity))
 
-    consumers = entry.options.get(CONF_CONSUMERS, [])
     for consumer in consumers:
+        entities.extend(
+            [
+                ConsumerPIDOutputPctSensor(coordinator, entry, consumer),
+                ConsumerDeltaWSensor(coordinator, entry, consumer),
+            ]
+        )
         if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_CONTROLLED:
             continue
         entities.extend(
@@ -104,6 +116,32 @@ class _BaseFlowSensor(CoordinatorEntity, SensorEntity):
     @property
     def _data(self):
         return getattr(self.coordinator, "data", None)
+
+
+class _BaseDividerSensor(CoordinatorEntity, SensorEntity):
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: SolarEnergyFlowCoordinator,
+        entry: ConfigEntry,
+        name: str,
+        unique_suffix: str,
+        entity_category: EntityCategory | None = None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{unique_suffix}"
+        if entity_category is not None:
+            self._attr_entity_category = entity_category
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{HUB_DEVICE_SUFFIX}"),
+            name=f"{entry.title} Energy Divider",
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider",
+        )
 
 
 class SolarEnergyFlowEffectiveSPSensor(_BaseFlowSensor):
@@ -242,6 +280,92 @@ class SolarEnergyFlowOutputPreRateLimitSensor(_BaseFlowSensor):
         return round(value, 1) if value is not None else None
 
 
+class EnergyDividerPIDOutputPctSensor(_BaseDividerSensor):
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "PID output %", "divider_pid_output_pct", EntityCategory.DIAGNOSTIC)
+
+    @property
+    def native_value(self):
+        value = getattr(self.coordinator, "pid_output_pct", None)
+        return round(value, 1) if value is not None else None
+
+
+class EnergyDividerDeltaWSensor(_BaseDividerSensor):
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "Delta W", "divider_delta_w", EntityCategory.DIAGNOSTIC)
+
+    @property
+    def native_value(self):
+        return getattr(self.coordinator, "delta_w", None)
+
+
+class EnergyDividerConsumersSummarySensor(_BaseDividerSensor):
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry, consumers: list[dict]) -> None:
+        super().__init__(coordinator, entry, "Consumers summary", "divider_consumers_summary", EntityCategory.DIAGNOSTIC)
+        self._consumers = consumers
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                consumer_runtime_updated_signal(self._entry.entry_id),
+                self._handle_runtime_update,
+            )
+        )
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_runtime_update(self, consumer_id: str) -> None:
+        if any(consumer.get(CONSUMER_ID) == consumer_id for consumer in self._consumers):
+            self.async_write_ha_state()
+
+    def _truncate(self, value: str) -> str:
+        if len(value) <= 255:
+            return value
+        return value[:252] + "..."
+
+    def _format_consumer(self, consumer: dict) -> str | None:
+        consumer_id = consumer.get(CONSUMER_ID)
+        if consumer_id is None:
+            return None
+        name = consumer.get(CONSUMER_NAME, consumer_id)
+        runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
+        cmd_w = runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
+        consumer_type = consumer.get(CONSUMER_TYPE)
+        display_value: str
+        if consumer_type == CONSUMER_TYPE_CONTROLLED:
+            display_value = f"{round(cmd_w)}W"
+        elif cmd_w is not None and abs(cmd_w) > 0:
+            display_value = f"{round(cmd_w)}W"
+        else:
+            binding = get_consumer_binding(self.hass, self._entry.entry_id, consumer)
+            enabled_state = binding.get_effective_enabled(self.hass) if binding is not None else None
+            if enabled_state is True:
+                display_value = "ON"
+            elif enabled_state is False:
+                display_value = "OFF"
+            else:
+                display_value = "UNKNOWN"
+        return f"{name}={display_value}"
+
+    @property
+    def native_value(self) -> str | None:
+        if not self._consumers:
+            return None
+        entries: list[str] = []
+        for consumer in self._consumers:
+            formatted = self._format_consumer(consumer)
+            if formatted:
+                entries.append(formatted)
+        summary = "; ".join(entries)
+        return self._truncate(summary) if summary else None
+
+
 class BatterySOCSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:battery-high"
@@ -285,6 +409,56 @@ class BatterySOCSensor(SensorEntity):
     @property
     def native_value(self):
         return self._read_source_value()
+
+
+class _BaseConsumerMirrorSensor(CoordinatorEntity, SensorEntity):
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: SolarEnergyFlowCoordinator,
+        entry: ConfigEntry,
+        consumer: dict,
+        name: str,
+        unique_suffix: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._consumer = consumer
+        self._consumer_id = consumer[CONSUMER_ID]
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{self._consumer_id}_{unique_suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
+            name=consumer.get(CONSUMER_NAME, "Consumer"),
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider Consumer",
+        )
+
+
+class ConsumerPIDOutputPctSensor(_BaseConsumerMirrorSensor):
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry, consumer: dict) -> None:
+        super().__init__(coordinator, entry, consumer, "PID output %", "pid_output_pct")
+
+    @property
+    def native_value(self):
+        value = getattr(self.coordinator, "pid_output_pct", None)
+        return round(value, 1) if value is not None else None
+
+
+class ConsumerDeltaWSensor(_BaseConsumerMirrorSensor):
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry, consumer: dict) -> None:
+        super().__init__(coordinator, entry, consumer, "Delta W", "delta_w")
+
+    @property
+    def native_value(self):
+        return getattr(self.coordinator, "delta_w", None)
 
 
 class _BaseConsumerRuntimeSensor(SensorEntity):

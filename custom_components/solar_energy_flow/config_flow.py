@@ -76,12 +76,8 @@ from .const import (
     CONSUMER_ENABLE_TARGET_ENTITY_ID,
     CONSUMER_STATE_ENTITY_ID,
     CONSUMER_POWER_TARGET_ENTITY_ID,
-    CONSUMER_POWER_SERVICE,
-    CONSUMER_VALUE_FIELD,
     CONSUMER_CONTROL_MODE_ONOFF,
     CONSUMER_CONTROL_MODE_PRESS,
-    CONSUMER_DEFAULT_POWER_SERVICE,
-    CONSUMER_DEFAULT_VALUE_FIELD,
     CONSUMER_PRIORITY,
     CONSUMER_MAX_POWER_W,
     CONSUMER_MIN_POWER_W,
@@ -560,15 +556,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     ): vol.Coerce(float),
                     vol.Required(
                         CONSUMER_POWER_TARGET_ENTITY_ID, default=defaults.get(CONSUMER_POWER_TARGET_ENTITY_ID, "")
-                    ): selector.EntitySelector(selector.EntitySelectorConfig(domain=["number"])),
-                    vol.Optional(
-                        CONSUMER_POWER_SERVICE,
-                        default=defaults.get(CONSUMER_POWER_SERVICE, CONSUMER_DEFAULT_POWER_SERVICE),
-                    ): str,
-                    vol.Optional(
-                        CONSUMER_VALUE_FIELD,
-                        default=defaults.get(CONSUMER_VALUE_FIELD, CONSUMER_DEFAULT_VALUE_FIELD),
-                    ): str,
+                    ): selector.EntitySelector(selector.EntitySelectorConfig(domain=["number", "input_number"])),
                 }
             )
         else:
@@ -613,7 +601,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             errors["base"] = "invalid_power_range"
         if consumer_type == CONSUMER_TYPE_CONTROLLED:
             power_target_domain = _extract_domain(user_input.get(CONSUMER_POWER_TARGET_ENTITY_ID))
-            if power_target_domain and power_target_domain != "number":
+            if power_target_domain and power_target_domain not in {"number", "input_number"}:
                 errors[CONSUMER_POWER_TARGET_ENTITY_ID] = "invalid_power_target_domain"
 
         if consumer_type == CONSUMER_TYPE_BINARY:
@@ -642,10 +630,6 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             consumer[CONSUMER_MIN_POWER_W] = float(user_input[CONSUMER_MIN_POWER_W])
             consumer[CONSUMER_MAX_POWER_W] = float(user_input[CONSUMER_MAX_POWER_W])
             consumer[CONSUMER_POWER_TARGET_ENTITY_ID] = user_input.get(CONSUMER_POWER_TARGET_ENTITY_ID, "")
-            consumer[CONSUMER_POWER_SERVICE] = user_input.get(
-                CONSUMER_POWER_SERVICE, CONSUMER_DEFAULT_POWER_SERVICE
-            )
-            consumer[CONSUMER_VALUE_FIELD] = user_input.get(CONSUMER_VALUE_FIELD, CONSUMER_DEFAULT_VALUE_FIELD)
         else:
             consumer[CONSUMER_ON_THRESHOLD_W] = float(user_input[CONSUMER_ON_THRESHOLD_W])
             consumer[CONSUMER_OFF_THRESHOLD_W] = float(user_input[CONSUMER_OFF_THRESHOLD_W])

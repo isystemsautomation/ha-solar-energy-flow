@@ -10,17 +10,13 @@ from homeassistant.exceptions import HomeAssistantError
 from .const import (
     CONSUMER_CONTROL_MODE_ONOFF,
     CONSUMER_CONTROL_MODE_PRESS,
-    CONSUMER_DEFAULT_POWER_SERVICE,
-    CONSUMER_DEFAULT_VALUE_FIELD,
     CONSUMER_ENABLE_CONTROL_MODE,
     CONSUMER_ENABLE_TARGET_ENTITY_ID,
     CONSUMER_ID,
     CONSUMER_MIN_RATE_LIMIT_SEC,
     CONSUMER_POWER_DEADBAND_W,
-    CONSUMER_POWER_SERVICE,
     CONSUMER_POWER_TARGET_ENTITY_ID,
     CONSUMER_STATE_ENTITY_ID,
-    CONSUMER_VALUE_FIELD,
     DOMAIN,
 )
 
@@ -53,13 +49,6 @@ def _state_to_bool(hass: HomeAssistant, entity_id: str | None) -> bool | None:
     except (TypeError, ValueError):
         return None
     return num > 0
-
-
-def _parse_service(service: str) -> tuple[str, str]:
-    if "." in service:
-        domain, svc = service.split(".", 1)
-        return domain, svc
-    return "homeassistant", service
 
 
 def get_consumer_binding(hass: HomeAssistant, entry_id: str, consumer: dict[str, Any]) -> "ConsumerBinding":
@@ -97,8 +86,6 @@ class ConsumerBinding:
         self.enable_target_entity_id = consumer.get(CONSUMER_ENABLE_TARGET_ENTITY_ID)
         self.state_entity_id = consumer.get(CONSUMER_STATE_ENTITY_ID)
         self.power_target_entity_id = consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID)
-        self.power_service = consumer.get(CONSUMER_POWER_SERVICE, CONSUMER_DEFAULT_POWER_SERVICE)
-        self.value_field = consumer.get(CONSUMER_VALUE_FIELD, CONSUMER_DEFAULT_VALUE_FIELD)
 
     def _rate_limited(self, last_time: datetime | None) -> bool:
         if last_time is None:
@@ -181,10 +168,9 @@ class ConsumerBinding:
             )
             return False
 
-        domain, service = _parse_service(self.power_service or CONSUMER_DEFAULT_POWER_SERVICE)
-        payload = {self.value_field or CONSUMER_DEFAULT_VALUE_FIELD: target_power, "entity_id": self.power_target_entity_id}
+        payload = {"entity_id": self.power_target_entity_id, "value": target_power}
         try:
-            await hass.services.async_call(domain, service, payload, blocking=True)
+            await hass.services.async_call("number", "set_value", payload, blocking=True)
         except HomeAssistantError as err:
             _LOGGER.error(
                 "Failed to send power command for consumer %s (%s): %s",

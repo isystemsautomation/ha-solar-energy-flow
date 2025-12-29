@@ -64,6 +64,7 @@
       "invalid_setpoint_domain": "Select a number or input_number entity for the setpoint.",
       "invalid_output_domain": "Output must be a number or input_number entity.",
       "invalid_grid_domain": "Select a sensor, number, or input_number entity for grid power.",
+      "invalid_power_target_domain": "Power target must be a number or input_number entity.",
       "invalid_max_output_step": "Max output step must be zero or positive.",
       "invalid_output_epsilon": "Output epsilon must be zero or positive.",
       "invalid_pv_range": "PV max must be greater than PV min.",

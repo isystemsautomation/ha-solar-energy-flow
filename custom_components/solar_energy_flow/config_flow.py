@@ -260,6 +260,26 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             if grid_domain not in _GRID_DOMAINS:
                 errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
 
+            max_output_step = preserved.get(CONF_MAX_OUTPUT_STEP, DEFAULT_MAX_OUTPUT_STEP)
+            output_epsilon = preserved.get(CONF_OUTPUT_EPSILON, DEFAULT_OUTPUT_EPSILON)
+
+            try:
+                max_output_step_val = float(max_output_step)
+            except (TypeError, ValueError):
+                errors["base"] = "invalid_max_output_step"
+            else:
+                if max_output_step_val < 0:
+                    errors["base"] = "invalid_max_output_step"
+
+            if "base" not in errors:
+                try:
+                    output_epsilon_val = float(output_epsilon)
+                except (TypeError, ValueError):
+                    errors["base"] = "invalid_output_epsilon"
+                else:
+                    if output_epsilon_val < 0:
+                        errors["base"] = "invalid_output_epsilon"
+
             if errors:
                 return self.async_show_form(
                     step_id="init",

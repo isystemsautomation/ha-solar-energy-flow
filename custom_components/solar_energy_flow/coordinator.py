@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Mapping, Any, Tuple
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -284,7 +287,7 @@ async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> bool
 
     try:
         await hass.services.async_call(domain, "set_value", {"entity_id": entity_id, "value": value}, blocking=True)
-    except Exception as err:
+    except (HomeAssistantError, asyncio.TimeoutError, ValueError) as err:
         _LOGGER.warning("Failed to set output %s: %s", entity_id, err)
         return False
 
@@ -546,6 +549,14 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         )
 
     def _apply_output_fence(self, desired_output: float, options: RuntimeOptions) -> Tuple[float, bool]:
+        if not math.isfinite(desired_output):
+            _LOGGER.warning(
+                "Invalid (non-finite) desired output %s for %s; skipping write",
+                desired_output,
+                self.entry.entry_id,
+            )
+            return self._last_output, False
+
         clamped = max(options.min_output, min(options.max_output, desired_output))
         limited = clamped
         last_output = self._last_output

@@ -6,7 +6,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, PLATFORMS
+from .const import (
+    DOMAIN,
+    PLATFORMS,
+    HUB_DEVICE_SUFFIX,
+    PID_DEVICE_SUFFIX,
+    DIVIDER_DEVICE_SUFFIX,
+)
 from .coordinator import SolarEnergyFlowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,12 +29,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     device_registry = dr.async_get(hass)
+    hub_identifier = (DOMAIN, f"{entry.entry_id}_{HUB_DEVICE_SUFFIX}")
+    pid_identifier = (DOMAIN, f"{entry.entry_id}_{PID_DEVICE_SUFFIX}")
+    divider_identifier = (DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}")
+
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.entry_id)},
-        name=entry.title,
+        identifiers={hub_identifier},
+        name="Solar Energy Flow",
+        manufacturer="Solar Energy Flow",
+        model="Hub",
+    )
+
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={pid_identifier},
+        via_device=hub_identifier,
+        name=f"{entry.title} PID Controller",
         manufacturer="Solar Energy Flow",
         model="PID Controller",
+    )
+
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={divider_identifier},
+        via_device=hub_identifier,
+        name=f"{entry.title} Energy Divider",
+        manufacturer="Solar Energy Flow",
+        model="Energy Divider",
     )
 
     await coordinator.async_config_entry_first_refresh()

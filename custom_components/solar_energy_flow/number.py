@@ -40,6 +40,8 @@ from .const import (
     RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
+    HUB_DEVICE_SUFFIX,
+    PID_DEVICE_SUFFIX,
 )
 from .coordinator import SolarEnergyFlowCoordinator
 
@@ -202,8 +204,9 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
         self._attr_entity_category = entity_category
         self._attr_native_unit_of_measurement = native_unit
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
+            identifiers={(DOMAIN, f"{entry.entry_id}_{PID_DEVICE_SUFFIX}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{HUB_DEVICE_SUFFIX}"),
+            name=f"{entry.title} PID Controller",
             manufacturer="Solar Energy Flow",
             model="PID Controller",
         )
@@ -272,8 +275,9 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
         self._attr_native_min_value = min_value
         self._attr_native_max_value = max_value
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
+            identifiers={(DOMAIN, f"{entry.entry_id}_{PID_DEVICE_SUFFIX}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{HUB_DEVICE_SUFFIX}"),
+            name=f"{entry.title} PID Controller",
             manufacturer="Solar Energy Flow",
             model="PID Controller",
         )

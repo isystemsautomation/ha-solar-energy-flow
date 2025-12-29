@@ -1,5 +1,10 @@
 DOMAIN = "solar_energy_flow"
 
+HUB_DEVICE_SUFFIX = "hub"
+PID_DEVICE_SUFFIX = "pid"
+DIVIDER_DEVICE_SUFFIX = "divider"
+
+CONF_BATTERY_SOC_ENTITY = "battery_soc_entity"
 CONF_PROCESS_VALUE_ENTITY = "process_value_entity"
 CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_OUTPUT_ENTITY = "output_entity"

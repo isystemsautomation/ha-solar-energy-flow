@@ -2,33 +2,47 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    CONF_BATTERY_SOC_ENTITY,
+    DOMAIN,
+    DIVIDER_DEVICE_SUFFIX,
+    HUB_DEVICE_SUFFIX,
+    PID_DEVICE_SUFFIX,
+)
 from .coordinator import SolarEnergyFlowCoordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            SolarEnergyFlowEffectiveSPSensor(coordinator, entry),
-            SolarEnergyFlowPVValueSensor(coordinator, entry),
-            SolarEnergyFlowOutputSensor(coordinator, entry),
-            SolarEnergyFlowErrorSensor(coordinator, entry),
-            SolarEnergyFlowStatusSensor(coordinator, entry),
-            SolarEnergyFlowGridPowerSensor(coordinator, entry),
-            SolarEnergyFlowPTermSensor(coordinator, entry),
-            SolarEnergyFlowITermSensor(coordinator, entry),
-            SolarEnergyFlowDTermSensor(coordinator, entry),
-            SolarEnergyFlowLimiterStateSensor(coordinator, entry),
-            SolarEnergyFlowOutputPreRateLimitSensor(coordinator, entry),
-        ]
-    )
+    entities: list[SensorEntity] = [
+        SolarEnergyFlowEffectiveSPSensor(coordinator, entry),
+        SolarEnergyFlowPVValueSensor(coordinator, entry),
+        SolarEnergyFlowOutputSensor(coordinator, entry),
+        SolarEnergyFlowErrorSensor(coordinator, entry),
+        SolarEnergyFlowStatusSensor(coordinator, entry),
+        SolarEnergyFlowGridPowerSensor(coordinator, entry),
+        SolarEnergyFlowPTermSensor(coordinator, entry),
+        SolarEnergyFlowITermSensor(coordinator, entry),
+        SolarEnergyFlowDTermSensor(coordinator, entry),
+        SolarEnergyFlowLimiterStateSensor(coordinator, entry),
+        SolarEnergyFlowOutputPreRateLimitSensor(coordinator, entry),
+    ]
+
+    if CONF_BATTERY_SOC_ENTITY in entry.options:
+        battery_soc_entity = entry.options.get(CONF_BATTERY_SOC_ENTITY)
+    else:
+        battery_soc_entity = entry.data.get(CONF_BATTERY_SOC_ENTITY)
+    if battery_soc_entity:
+        entities.append(BatterySOCSensor(entry, battery_soc_entity))
+
+    async_add_entities(entities)
 
 
 class _BaseFlowSensor(CoordinatorEntity, SensorEntity):
@@ -49,8 +63,9 @@ class _BaseFlowSensor(CoordinatorEntity, SensorEntity):
         if entity_category is not None:
             self._attr_entity_category = entity_category
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
+            identifiers={(DOMAIN, f"{entry.entry_id}_{PID_DEVICE_SUFFIX}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{HUB_DEVICE_SUFFIX}"),
+            name=f"{entry.title} PID Controller",
             manufacturer="Solar Energy Flow",
             model="PID Controller",
         )
@@ -194,3 +209,48 @@ class SolarEnergyFlowOutputPreRateLimitSensor(_BaseFlowSensor):
         data = self._data
         value = getattr(data, "output_pre_rate_limit", None)
         return round(value, 1) if value is not None else None
+
+
+class BatterySOCSensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:battery-high"
+    _attr_should_poll = False
+
+    def __init__(self, entry: ConfigEntry, source_entity: str) -> None:
+        self._entry = entry
+        self._source_entity = source_entity
+        self._attr_name = "Battery SOC"
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_battery_soc"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{HUB_DEVICE_SUFFIX}"),
+            name=f"{entry.title} Energy Divider",
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_state_change_event(
+                self.hass, [self._source_entity], self._handle_state_update
+            )
+        )
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_state_update(self, event) -> None:
+        self.async_write_ha_state()
+
+    def _read_source_value(self):
+        state = self.hass.states.get(self._source_entity)
+        if state is None:
+            return None
+        try:
+            return float(state.state)
+        except (TypeError, ValueError):
+            return state.state
+
+    @property
+    def native_value(self):
+        return self._read_source_value()

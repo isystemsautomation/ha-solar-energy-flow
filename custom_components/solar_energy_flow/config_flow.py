@@ -6,6 +6,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     DOMAIN,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_NAME,
     CONF_PROCESS_VALUE_ENTITY,
     CONF_SETPOINT_ENTITY,
@@ -71,6 +72,7 @@ _PV_DOMAINS = {"sensor", "number", "input_number"}
 _SETPOINT_DOMAINS = {"number", "input_number"}
 _OUTPUT_DOMAINS = {"number", "input_number"}
 _GRID_DOMAINS = {"sensor", "number", "input_number"}
+_BATTERY_SOC_DOMAINS = {"sensor"}
 
 
 def _extract_domain(entity_id: str | None) -> str | None:
@@ -89,6 +91,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             sp_domain = _extract_domain(user_input[CONF_SETPOINT_ENTITY])
             output_domain = _extract_domain(user_input[CONF_OUTPUT_ENTITY])
             grid_domain = _extract_domain(user_input[CONF_GRID_POWER_ENTITY])
+            battery_soc_domain = _extract_domain(user_input.get(CONF_BATTERY_SOC_ENTITY))
 
             if pv_domain not in _PV_DOMAINS:
                 errors[CONF_PROCESS_VALUE_ENTITY] = "invalid_pv_domain"
@@ -98,6 +101,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_OUTPUT_ENTITY] = "invalid_output_domain"
             if grid_domain not in _GRID_DOMAINS:
                 errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
+            if user_input.get(CONF_BATTERY_SOC_ENTITY) and battery_soc_domain not in _BATTERY_SOC_DOMAINS:
+                errors[CONF_BATTERY_SOC_ENTITY] = "invalid_battery_soc_domain"
 
             range_valid = True
             try:
@@ -149,6 +154,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(CONF_GRID_POWER_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
+                ),
+                vol.Optional(CONF_BATTERY_SOC_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))
                 ),
                 vol.Required(CONF_PV_MIN, default=DEFAULT_PV_MIN): vol.Coerce(float),
                 vol.Required(CONF_PV_MAX, default=DEFAULT_PV_MAX): vol.Coerce(float),
@@ -206,6 +214,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
                 ),
+                vol.Optional(
+                    CONF_BATTERY_SOC_ENTITY, default=defaults.get(CONF_BATTERY_SOC_ENTITY)
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))),
                 vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
                 vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
                 vol.Optional(
@@ -268,6 +279,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_GRID_POWER_ENTITY: o.get(
                 CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY, "")
             ),
+            CONF_BATTERY_SOC_ENTITY: o.get(
+                CONF_BATTERY_SOC_ENTITY, self._config_entry.data.get(CONF_BATTERY_SOC_ENTITY)
+            ),
             CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
             CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
             CONF_GRID_POWER_INVERT: o.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
@@ -291,6 +305,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_SETPOINT_ENTITY: user_input.get(CONF_SETPOINT_ENTITY, defaults[CONF_SETPOINT_ENTITY]),
                 CONF_OUTPUT_ENTITY: user_input.get(CONF_OUTPUT_ENTITY, defaults[CONF_OUTPUT_ENTITY]),
                 CONF_GRID_POWER_ENTITY: user_input.get(CONF_GRID_POWER_ENTITY, defaults[CONF_GRID_POWER_ENTITY]),
+                CONF_BATTERY_SOC_ENTITY: user_input.get(
+                    CONF_BATTERY_SOC_ENTITY, defaults.get(CONF_BATTERY_SOC_ENTITY)
+                ),
                 CONF_INVERT_PV: user_input.get(CONF_INVERT_PV, defaults[CONF_INVERT_PV]),
                 CONF_INVERT_SP: user_input.get(CONF_INVERT_SP, defaults[CONF_INVERT_SP]),
                 CONF_GRID_POWER_INVERT: user_input.get(CONF_GRID_POWER_INVERT, defaults[CONF_GRID_POWER_INVERT]),
@@ -312,6 +329,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             sp_domain = _extract_domain(cleaned[CONF_SETPOINT_ENTITY])
             output_domain = _extract_domain(cleaned[CONF_OUTPUT_ENTITY])
             grid_domain = _extract_domain(cleaned[CONF_GRID_POWER_ENTITY])
+            battery_soc_domain = _extract_domain(cleaned.get(CONF_BATTERY_SOC_ENTITY))
 
             if pv_domain not in _PV_DOMAINS:
                 errors[CONF_PROCESS_VALUE_ENTITY] = "invalid_pv_domain"
@@ -321,6 +339,8 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 errors[CONF_OUTPUT_ENTITY] = "invalid_output_domain"
             if grid_domain not in _GRID_DOMAINS:
                 errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
+            if cleaned.get(CONF_BATTERY_SOC_ENTITY) and battery_soc_domain not in _BATTERY_SOC_DOMAINS:
+                errors[CONF_BATTERY_SOC_ENTITY] = "invalid_battery_soc_domain"
 
             max_output_step = preserved.get(CONF_MAX_OUTPUT_STEP, DEFAULT_MAX_OUTPUT_STEP)
             output_epsilon = preserved.get(CONF_OUTPUT_EPSILON, DEFAULT_OUTPUT_EPSILON)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers import selector
@@ -66,6 +68,17 @@ from .const import (
     DEFAULT_GRID_MAX,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
+    CONF_CONSUMERS,
+    CONSUMER_ID,
+    CONSUMER_NAME,
+    CONSUMER_TYPE,
+    CONSUMER_PRIORITY,
+    CONSUMER_MAX_POWER_W,
+    CONSUMER_MIN_POWER_W,
+    CONSUMER_ON_THRESHOLD_W,
+    CONSUMER_OFF_THRESHOLD_W,
+    CONSUMER_TYPE_BINARY,
+    CONSUMER_TYPE_CONTROLLED,
 )
 
 _PV_DOMAINS = {"sensor", "number", "input_number"}
@@ -174,6 +187,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         # config_entry is read-only in your HA version
         self._config_entry = config_entry
+        self._consumers: list[dict] = list(config_entry.options.get(CONF_CONSUMERS, []))
+        self._selected_consumer_id: str | None = None
+        self._pending_consumer_type: str | None = None
 
     @staticmethod
     def _coerce_int(value, default, min_value=1):
@@ -240,7 +256,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             }
         )
 
-    async def async_step_init(self, user_input=None):
+    async def async_step_init_settings(self, user_input=None):
         o = self._config_entry.options
         errors: dict[str, str] = {}
 
@@ -358,9 +374,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     output_epsilon_val = float(output_epsilon)
                 except (TypeError, ValueError):
                     errors["base"] = "invalid_output_epsilon"
-            else:
-                if output_epsilon_val < 0:
-                    errors["base"] = "invalid_output_epsilon"
+                else:
+                    if output_epsilon_val < 0:
+                        errors["base"] = "invalid_output_epsilon"
 
             if "base" not in errors:
                 if not self._validate_range(cleaned[CONF_PV_MIN], cleaned[CONF_PV_MAX]):
@@ -372,15 +388,200 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
 
             if errors:
                 return self.async_show_form(
-                    step_id="init",
+                    step_id="init_settings",
                     data_schema=self._build_schema(defaults),
                     errors=errors,
                 )
 
-            return self.async_create_entry(title="", data={**preserved, **cleaned})
+            options = {**preserved, **cleaned}
+            options[CONF_CONSUMERS] = self._consumers
+            return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
-            step_id="init",
+            step_id="init_settings",
             data_schema=self._build_schema(defaults),
             errors=errors,
         )
+
+    async def async_step_init(self, user_input=None):
+        return self.async_show_menu(
+            step_id="init",
+            menu_options={
+                "configure": "configure",
+                "add_consumer": "add_consumer",
+                "edit_consumer": "edit_consumer",
+                "remove_consumer": "remove_consumer",
+            },
+        )
+
+    async def async_step_configure(self, user_input=None):
+        return await self.async_step_init_settings(user_input)
+
+    async def async_step_add_consumer(self, user_input=None):
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            consumer_type = user_input[CONSUMER_TYPE]
+            if consumer_type not in (CONSUMER_TYPE_CONTROLLED, CONSUMER_TYPE_BINARY):
+                errors["base"] = "invalid_consumer_type"
+            else:
+                self._pending_consumer_type = consumer_type
+                return await self.async_step_add_consumer_details()
+
+        return self.async_show_form(
+            step_id="add_consumer",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONSUMER_TYPE): vol.In(
+                        {CONSUMER_TYPE_CONTROLLED: "Controlled", CONSUMER_TYPE_BINARY: "Binary"}
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_add_consumer_details(self, user_input=None):
+        consumer_type = self._pending_consumer_type
+        if consumer_type is None:
+            return await self.async_step_add_consumer()
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = self._validate_consumer_input(user_input, consumer_type)
+            if not errors:
+                consumer = self._build_consumer(user_input, consumer_type, uuid.uuid4().hex)
+                self._consumers.append(consumer)
+                return self._create_entry_with_consumers()
+
+        return self.async_show_form(
+            step_id="add_consumer_details",
+            data_schema=self._consumer_schema(consumer_type, user_input or {}),
+            errors=errors,
+        )
+
+    async def async_step_edit_consumer(self, user_input=None):
+        if not self._consumers:
+            return self.async_abort(reason="no_consumers")
+
+        consumer_map = {c[CONSUMER_ID]: c[CONSUMER_NAME] for c in self._consumers}
+        if user_input is not None:
+            consumer_id = user_input.get("consumer")
+            if consumer_id in consumer_map:
+                self._selected_consumer_id = consumer_id
+                return await self.async_step_edit_consumer_details()
+
+        return self.async_show_form(
+            step_id="edit_consumer",
+            data_schema=vol.Schema({vol.Required("consumer"): vol.In(consumer_map)}),
+        )
+
+    async def async_step_edit_consumer_details(self, user_input=None):
+        if not self._selected_consumer_id:
+            return await self.async_step_edit_consumer()
+
+        consumer = next((c for c in self._consumers if c[CONSUMER_ID] == self._selected_consumer_id), None)
+        if consumer is None:
+            return await self.async_step_edit_consumer()
+
+        consumer_type = consumer[CONSUMER_TYPE]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = self._validate_consumer_input(user_input, consumer_type)
+            if not errors:
+                updated = self._build_consumer(user_input, consumer_type, consumer[CONSUMER_ID])
+                self._consumers = [
+                    updated if c[CONSUMER_ID] == self._selected_consumer_id else c for c in self._consumers
+                ]
+                return self._create_entry_with_consumers()
+
+        return self.async_show_form(
+            step_id="edit_consumer_details",
+            data_schema=self._consumer_schema(consumer_type, consumer),
+            errors=errors,
+        )
+
+    async def async_step_remove_consumer(self, user_input=None):
+        if not self._consumers:
+            return self.async_abort(reason="no_consumers")
+
+        consumer_map = {c[CONSUMER_ID]: c[CONSUMER_NAME] for c in self._consumers}
+        if user_input is not None:
+            consumer_id = user_input.get("consumer")
+            if consumer_id in consumer_map:
+                self._consumers = [c for c in self._consumers if c[CONSUMER_ID] != consumer_id]
+                return self._create_entry_with_consumers()
+
+        return self.async_show_form(
+            step_id="remove_consumer",
+            data_schema=vol.Schema({vol.Required("consumer"): vol.In(consumer_map)}),
+        )
+
+    def _consumer_schema(self, consumer_type: str, defaults: dict) -> vol.Schema:
+        base = {
+            vol.Required(CONSUMER_NAME, default=defaults.get(CONSUMER_NAME, "")): str,
+            vol.Required(CONSUMER_PRIORITY, default=defaults.get(CONSUMER_PRIORITY, 1)): vol.Coerce(int),
+        }
+        if consumer_type == CONSUMER_TYPE_CONTROLLED:
+            base.update(
+                {
+                    vol.Required(CONSUMER_MIN_POWER_W, default=defaults.get(CONSUMER_MIN_POWER_W, 0.0)): vol.Coerce(
+                        float
+                    ),
+                    vol.Required(
+                        CONSUMER_MAX_POWER_W, default=defaults.get(CONSUMER_MAX_POWER_W, 0.0)
+                    ): vol.Coerce(float),
+                }
+            )
+        else:
+            base.update(
+                {
+                    vol.Required(
+                        CONSUMER_ON_THRESHOLD_W, default=defaults.get(CONSUMER_ON_THRESHOLD_W, 0.0)
+                    ): vol.Coerce(float),
+                    vol.Required(
+                        CONSUMER_OFF_THRESHOLD_W, default=defaults.get(CONSUMER_OFF_THRESHOLD_W, 0.0)
+                    ): vol.Coerce(float),
+                }
+            )
+
+        return vol.Schema(base)
+
+    def _validate_consumer_input(self, user_input: dict, consumer_type: str) -> dict[str, str]:
+        errors: dict[str, str] = {}
+        try:
+            min_power = float(user_input.get(CONSUMER_MIN_POWER_W, 0.0))
+            max_power = float(user_input.get(CONSUMER_MAX_POWER_W, 0.0))
+        except (TypeError, ValueError):
+            min_power = max_power = 0.0
+
+        if consumer_type == CONSUMER_TYPE_CONTROLLED and max_power <= min_power:
+            errors["base"] = "invalid_power_range"
+
+        if consumer_type == CONSUMER_TYPE_BINARY:
+            try:
+                on_threshold = float(user_input.get(CONSUMER_ON_THRESHOLD_W, 0.0))
+                off_threshold = float(user_input.get(CONSUMER_OFF_THRESHOLD_W, 0.0))
+                if on_threshold < off_threshold:
+                    errors["base"] = "invalid_threshold_range"
+            except (TypeError, ValueError):
+                errors["base"] = "invalid_threshold_range"
+        return errors
+
+    def _build_consumer(self, user_input: dict, consumer_type: str, consumer_id: str) -> dict:
+        consumer = {
+            CONSUMER_ID: consumer_id,
+            CONSUMER_NAME: user_input[CONSUMER_NAME],
+            CONSUMER_TYPE: consumer_type,
+            CONSUMER_PRIORITY: int(user_input[CONSUMER_PRIORITY]),
+        }
+        if consumer_type == CONSUMER_TYPE_CONTROLLED:
+            consumer[CONSUMER_MIN_POWER_W] = float(user_input[CONSUMER_MIN_POWER_W])
+            consumer[CONSUMER_MAX_POWER_W] = float(user_input[CONSUMER_MAX_POWER_W])
+        else:
+            consumer[CONSUMER_ON_THRESHOLD_W] = float(user_input[CONSUMER_ON_THRESHOLD_W])
+            consumer[CONSUMER_OFF_THRESHOLD_W] = float(user_input[CONSUMER_OFF_THRESHOLD_W])
+        return consumer
+
+    def _create_entry_with_consumers(self):
+        options = dict(self._config_entry.options)
+        options[CONF_CONSUMERS] = self._consumers
+        return self.async_create_entry(title="", data=options)

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -18,19 +21,41 @@ from .const import (
     DOMAIN,
     HUB_DEVICE_SUFFIX,
     PID_DEVICE_SUFFIX,
+    DIVIDER_DEVICE_SUFFIX,
+    CONF_CONSUMERS,
+    CONSUMER_ID,
+    CONSUMER_NAME,
+    CONSUMER_DEVICE_SUFFIX,
 )
 from .coordinator import SolarEnergyFlowCoordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            SolarEnergyFlowEnabledSwitch(coordinator, entry),
-            SolarEnergyFlowGridLimiterSwitch(coordinator, entry),
-            SolarEnergyFlowRateLimiterSwitch(coordinator, entry),
-        ]
+    consumers = list(entry.options.get(CONF_CONSUMERS, []))
+
+    entities: list[SwitchEntity] = [
+        SolarEnergyFlowEnabledSwitch(coordinator, entry),
+        SolarEnergyFlowGridLimiterSwitch(coordinator, entry),
+        SolarEnergyFlowRateLimiterSwitch(coordinator, entry),
+    ]
+
+    for consumer in consumers:
+        entities.append(SolarEnergyFlowConsumerSwitch(entry, consumer))
+
+    async_add_entities(entities)
+
+    entry.async_on_unload(
+        entry.add_update_listener(_async_reload_on_consumer_change(consumers))
     )
+
+
+def _async_reload_on_consumer_change(initial_consumers: list[dict[str, Any]]):
+    async def _reload_if_needed(hass: HomeAssistant, updated_entry: ConfigEntry):
+        if initial_consumers != updated_entry.options.get(CONF_CONSUMERS, []):
+            await hass.config_entries.async_reload(updated_entry.entry_id)
+
+    return _reload_if_needed
 
 
 class SolarEnergyFlowEnabledSwitch(CoordinatorEntity, SwitchEntity):
@@ -66,6 +91,43 @@ class SolarEnergyFlowEnabledSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.apply_options(options)
         self.hass.config_entries.async_update_entry(self._entry, options=options)
         await self.coordinator.async_request_refresh()
+
+
+class SolarEnergyFlowConsumerSwitch(RestoreEntity, SwitchEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Enabled"
+    _attr_should_poll = False
+
+    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
+        self._entry = entry
+        self._consumer = consumer
+        self._is_on: bool = False
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{consumer[CONSUMER_ID]}_enabled"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{consumer[CONSUMER_ID]}")},
+            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
+            name=consumer.get(CONSUMER_NAME, "Consumer"),
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider Consumer",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._is_on = last_state.state == "on"
+
+    @property
+    def is_on(self) -> bool:
+        return self._is_on
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self._is_on = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self._is_on = False
+        self.async_write_ha_state()
 
 
 class SolarEnergyFlowRateLimiterSwitch(CoordinatorEntity, SwitchEntity):

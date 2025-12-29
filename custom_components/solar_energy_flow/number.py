@@ -317,13 +317,7 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             return self._default
 
     async def _async_snap_back(self) -> None:
-        mirror = self._mirror_value()
-        if self._option_key == CONF_MANUAL_SP_VALUE:
-            # Do not let forbidden edits overwrite the stored manual SP.
-            self.async_write_ha_state()
-        else:
-            self.coordinator._manual_out_value = mirror
-            self.async_write_ha_state()
+        self.async_write_ha_state()
 
     async def async_set_native_value(self, value: float) -> None:
         runtime_mode = self._runtime_mode()
@@ -341,16 +335,14 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
 
         options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
         options.setdefault(CONF_RUNTIME_MODE, runtime_mode)
-        options.setdefault(CONF_MANUAL_SP_VALUE, self.coordinator._manual_sp_value)
-        options.setdefault(CONF_MANUAL_OUT_VALUE, self.coordinator._manual_out_value)
+        options.setdefault(CONF_MANUAL_SP_VALUE, self.coordinator.get_manual_sp_value())
+        options.setdefault(CONF_MANUAL_OUT_VALUE, self.coordinator.get_manual_out_value())
         options[self._option_key] = value
 
         if self._option_key == CONF_MANUAL_SP_VALUE:
-            self.coordinator._manual_sp_value = value
+            await self.coordinator.async_set_manual_sp(value)
         else:
-            self.coordinator._manual_out_value = value
-            if runtime_mode == RUNTIME_MODE_MANUAL_OUT:
-                self.coordinator._last_output = value
+            await self.coordinator.async_set_manual_out(value)
 
         self.coordinator.apply_options(options)
         self.hass.config_entries.async_update_entry(self._entry, options=options)

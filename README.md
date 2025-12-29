@@ -45,7 +45,7 @@ Designed for **energy flow control** scenarios such as inverter power limiting, 
 During setup you must select the entities used by the controller.
 
 <p align="center">
-  <img src="images/Configuration1.png" width="300">
+  <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-flow/main/images/Configuration1.png" width="300">
 </p>
 
 | Item | Description | Supported Domains |
@@ -64,7 +64,7 @@ Invalid entity domains are rejected during setup.
 After installation, you can configure signal interpretation and controller behavior.
 
 <p align="center">
-  <img src="images/Configuration2.png" width="300">
+  <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-flow/main/images/Configuration2.png" width="300">
 </p>
 
 ### Options
@@ -83,7 +83,7 @@ After installation, you can configure signal interpretation and controller behav
 Runtime controls allow switching modes and manually overriding behavior.
 
 <p align="center">
-  <img src="images/Configuration3.png" width="200">
+  <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-flow/main/images/Configuration3.png" width="200">
 </p>
 
 ### Runtime Modes
@@ -104,7 +104,7 @@ Mode transitions use **bumpless transfer** to avoid output jumps.
 The integration exposes detailed runtime sensors for transparency and tuning.
 
 <p align="center">
-  <img src="images/Configuration4.png" width="200">
+  <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-flow/main/images/Configuration4.png" width="200">
 </p>
 
 ### Sensors
@@ -125,7 +125,7 @@ The integration exposes detailed runtime sensors for transparency and tuning.
 All tuning and limiter parameters are available as number and switch entities.
 
 <p align="center">
-  <img src="images/Configuration5.png" width="200">
+  <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-flow/main/images/Configuration5.png" width="200">
 </p>
 
 ### PID & Limits
@@ -151,7 +151,7 @@ All tuning and limiter parameters are available as number and switch entities.
 Additional diagnostic entities help understand controller behavior.
 
 <p align="center">
-  <img src="images/Configuration6.png" width="200">
+  <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-flow/main/images/Configuration6.png" width="200">
 </p>
 
 ### Diagnostic Entities

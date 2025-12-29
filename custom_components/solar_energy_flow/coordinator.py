@@ -193,6 +193,7 @@ def _get_limiter_type(entry: ConfigEntry) -> str:
 
 
 async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> None:
+    value = round(value, 1)
     domain = entity_id.split(".", 1)[0]
 
     if domain == "number":

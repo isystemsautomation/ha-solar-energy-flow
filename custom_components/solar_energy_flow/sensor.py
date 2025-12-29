@@ -47,7 +47,8 @@ class SolarEnergyFlowOutputSensor(_BaseFlowSensor):
 
     @property
     def native_value(self):
-        return self.coordinator.data.out
+        out = getattr(self.coordinator.data, "out", None)
+        return round(out, 1) if out is not None else None
 
 
 class SolarEnergyFlowErrorSensor(_BaseFlowSensor):

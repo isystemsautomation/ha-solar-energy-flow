@@ -15,6 +15,7 @@ from .const import (
 )
 from .consumer_bindings import cleanup_consumer_bindings
 from .coordinator import SolarEnergyFlowCoordinator
+from .helpers import ENTRY_DATA_CONSUMER_RUNTIME, get_entry_data, set_entry_coordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SolarEnergyFlowCoordinator(hass, entry)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry_data = set_entry_coordinator(hass, entry.entry_id, coordinator)
+    entry_data.setdefault(ENTRY_DATA_CONSUMER_RUNTIME, {})
 
     device_registry = dr.async_get(hass)
     hub_identifier = (DOMAIN, f"{entry.entry_id}_{HUB_DEVICE_SUFFIX}")
@@ -68,7 +70,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    entry_data = get_entry_data(hass, entry.entry_id)
+    coordinator: SolarEnergyFlowCoordinator = entry_data["coordinator"]
     new_options = dict(entry.options)
     old_options = coordinator.options_cache
 

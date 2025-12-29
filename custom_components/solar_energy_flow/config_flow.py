@@ -72,6 +72,16 @@ from .const import (
     CONSUMER_ID,
     CONSUMER_NAME,
     CONSUMER_TYPE,
+    CONSUMER_ENABLE_CONTROL_MODE,
+    CONSUMER_ENABLE_TARGET_ENTITY_ID,
+    CONSUMER_STATE_ENTITY_ID,
+    CONSUMER_POWER_TARGET_ENTITY_ID,
+    CONSUMER_POWER_SERVICE,
+    CONSUMER_VALUE_FIELD,
+    CONSUMER_CONTROL_MODE_ONOFF,
+    CONSUMER_CONTROL_MODE_PRESS,
+    CONSUMER_DEFAULT_POWER_SERVICE,
+    CONSUMER_DEFAULT_VALUE_FIELD,
     CONSUMER_PRIORITY,
     CONSUMER_MAX_POWER_W,
     CONSUMER_MIN_POWER_W,
@@ -516,9 +526,28 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         )
 
     def _consumer_schema(self, consumer_type: str, defaults: dict) -> vol.Schema:
+        control_mode_default = defaults.get(CONSUMER_ENABLE_CONTROL_MODE, CONSUMER_CONTROL_MODE_ONOFF)
+        if control_mode_default not in (CONSUMER_CONTROL_MODE_ONOFF, CONSUMER_CONTROL_MODE_PRESS):
+            control_mode_default = CONSUMER_CONTROL_MODE_ONOFF
+
+        enable_target_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain=["button"] if control_mode_default == CONSUMER_CONTROL_MODE_PRESS else ["switch"]
+            )
+        )
+
         base = {
             vol.Required(CONSUMER_NAME, default=defaults.get(CONSUMER_NAME, "")): str,
             vol.Required(CONSUMER_PRIORITY, default=defaults.get(CONSUMER_PRIORITY, 1)): vol.Coerce(int),
+            vol.Required(
+                CONSUMER_ENABLE_CONTROL_MODE, default=control_mode_default
+            ): vol.In({CONSUMER_CONTROL_MODE_ONOFF: "On/Off", CONSUMER_CONTROL_MODE_PRESS: "Button press"}),
+            vol.Required(
+                CONSUMER_ENABLE_TARGET_ENTITY_ID, default=defaults.get(CONSUMER_ENABLE_TARGET_ENTITY_ID, "")
+            ): enable_target_selector,
+            vol.Optional(
+                CONSUMER_STATE_ENTITY_ID, default=defaults.get(CONSUMER_STATE_ENTITY_ID)
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain=["switch", "binary_sensor", "sensor"])),
         }
         if consumer_type == CONSUMER_TYPE_CONTROLLED:
             base.update(
@@ -529,6 +558,17 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Required(
                         CONSUMER_MAX_POWER_W, default=defaults.get(CONSUMER_MAX_POWER_W, 0.0)
                     ): vol.Coerce(float),
+                    vol.Required(
+                        CONSUMER_POWER_TARGET_ENTITY_ID, default=defaults.get(CONSUMER_POWER_TARGET_ENTITY_ID, "")
+                    ): selector.EntitySelector(selector.EntitySelectorConfig(domain=["number"])),
+                    vol.Optional(
+                        CONSUMER_POWER_SERVICE,
+                        default=defaults.get(CONSUMER_POWER_SERVICE, CONSUMER_DEFAULT_POWER_SERVICE),
+                    ): str,
+                    vol.Optional(
+                        CONSUMER_VALUE_FIELD,
+                        default=defaults.get(CONSUMER_VALUE_FIELD, CONSUMER_DEFAULT_VALUE_FIELD),
+                    ): str,
                 }
             )
         else:
@@ -547,6 +587,22 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
 
     def _validate_consumer_input(self, user_input: dict, consumer_type: str) -> dict[str, str]:
         errors: dict[str, str] = {}
+        control_mode = user_input.get(CONSUMER_ENABLE_CONTROL_MODE, CONSUMER_CONTROL_MODE_ONOFF)
+        if control_mode not in (CONSUMER_CONTROL_MODE_ONOFF, CONSUMER_CONTROL_MODE_PRESS):
+            errors[CONSUMER_ENABLE_CONTROL_MODE] = "invalid_enable_control_mode"
+
+        enable_target_domain = _extract_domain(user_input.get(CONSUMER_ENABLE_TARGET_ENTITY_ID))
+        if control_mode == CONSUMER_CONTROL_MODE_PRESS:
+            if enable_target_domain != "button":
+                errors[CONSUMER_ENABLE_TARGET_ENTITY_ID] = "invalid_enable_target"
+        elif control_mode == CONSUMER_CONTROL_MODE_ONOFF:
+            if enable_target_domain != "switch":
+                errors[CONSUMER_ENABLE_TARGET_ENTITY_ID] = "invalid_enable_target"
+
+        state_domain = _extract_domain(user_input.get(CONSUMER_STATE_ENTITY_ID))
+        if state_domain and state_domain not in {"switch", "binary_sensor", "sensor"}:
+            errors[CONSUMER_STATE_ENTITY_ID] = "invalid_state_entity_domain"
+
         try:
             min_power = float(user_input.get(CONSUMER_MIN_POWER_W, 0.0))
             max_power = float(user_input.get(CONSUMER_MAX_POWER_W, 0.0))
@@ -555,6 +611,10 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
 
         if consumer_type == CONSUMER_TYPE_CONTROLLED and max_power <= min_power:
             errors["base"] = "invalid_power_range"
+        if consumer_type == CONSUMER_TYPE_CONTROLLED:
+            power_target_domain = _extract_domain(user_input.get(CONSUMER_POWER_TARGET_ENTITY_ID))
+            if power_target_domain and power_target_domain != "number":
+                errors[CONSUMER_POWER_TARGET_ENTITY_ID] = "invalid_power_target_domain"
 
         if consumer_type == CONSUMER_TYPE_BINARY:
             try:
@@ -572,10 +632,20 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONSUMER_NAME: user_input[CONSUMER_NAME],
             CONSUMER_TYPE: consumer_type,
             CONSUMER_PRIORITY: int(user_input[CONSUMER_PRIORITY]),
+            CONSUMER_ENABLE_CONTROL_MODE: user_input.get(
+                CONSUMER_ENABLE_CONTROL_MODE, CONSUMER_CONTROL_MODE_ONOFF
+            ),
+            CONSUMER_ENABLE_TARGET_ENTITY_ID: user_input.get(CONSUMER_ENABLE_TARGET_ENTITY_ID),
+            CONSUMER_STATE_ENTITY_ID: user_input.get(CONSUMER_STATE_ENTITY_ID),
         }
         if consumer_type == CONSUMER_TYPE_CONTROLLED:
             consumer[CONSUMER_MIN_POWER_W] = float(user_input[CONSUMER_MIN_POWER_W])
             consumer[CONSUMER_MAX_POWER_W] = float(user_input[CONSUMER_MAX_POWER_W])
+            consumer[CONSUMER_POWER_TARGET_ENTITY_ID] = user_input.get(CONSUMER_POWER_TARGET_ENTITY_ID, "")
+            consumer[CONSUMER_POWER_SERVICE] = user_input.get(
+                CONSUMER_POWER_SERVICE, CONSUMER_DEFAULT_POWER_SERVICE
+            )
+            consumer[CONSUMER_VALUE_FIELD] = user_input.get(CONSUMER_VALUE_FIELD, CONSUMER_DEFAULT_VALUE_FIELD)
         else:
             consumer[CONSUMER_ON_THRESHOLD_W] = float(user_input[CONSUMER_ON_THRESHOLD_W])
             consumer[CONSUMER_OFF_THRESHOLD_W] = float(user_input[CONSUMER_OFF_THRESHOLD_W])

@@ -53,7 +53,9 @@ from .const import (
     CONSUMER_NAME,
     CONSUMER_MIN_POWER_W,
     CONSUMER_MAX_POWER_W,
+    CONSUMER_POWER_TARGET_ENTITY_ID,
 )
+from .consumer_bindings import ConsumerBinding, get_consumer_binding
 from .coordinator import SolarEnergyFlowCoordinator
 
 
@@ -277,6 +279,7 @@ class SolarEnergyFlowConsumerNumber(RestoreNumber):
     def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
         self._entry = entry
         self._consumer = consumer
+        self._binding: ConsumerBinding | None = None
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{consumer[CONSUMER_ID]}_power"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{consumer[CONSUMER_ID]}")},
@@ -291,9 +294,16 @@ class SolarEnergyFlowConsumerNumber(RestoreNumber):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self._binding = get_consumer_binding(self.hass, self._entry.entry_id, self._consumer)
+        if self._binding is not None:
+            self._binding.set_desired_power(self._current_value)
         last = await self.async_get_last_number_data()
         if last is not None and last.native_value is not None:
             self._current_value = float(last.native_value)
+            if self._binding is not None:
+                self._binding.set_desired_power(self._current_value)
+        if self._binding is not None and self._consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID):
+            await self._binding.async_push_power(self.hass)
 
     @property
     def native_value(self) -> float | None:
@@ -301,6 +311,11 @@ class SolarEnergyFlowConsumerNumber(RestoreNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         self._current_value = float(value)
+        if self._binding is None:
+            self.async_write_ha_state()
+            return
+        self._binding.set_desired_power(self._current_value)
+        await self._binding.async_push_power(self.hass)
         self.async_write_ha_state()
 
 

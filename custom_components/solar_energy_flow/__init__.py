@@ -13,6 +13,7 @@ from .const import (
     PID_DEVICE_SUFFIX,
     DIVIDER_DEVICE_SUFFIX,
 )
+from .consumer_bindings import cleanup_consumer_bindings
 from .coordinator import SolarEnergyFlowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,4 +91,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        cleanup_consumer_bindings(hass, entry.entry_id)
     return unload_ok

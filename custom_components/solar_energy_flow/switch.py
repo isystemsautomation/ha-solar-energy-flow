@@ -26,7 +26,10 @@ from .const import (
     CONSUMER_ID,
     CONSUMER_NAME,
     CONSUMER_DEVICE_SUFFIX,
+    CONSUMER_TYPE,
+    CONSUMER_TYPE_CONTROLLED,
 )
+from .consumer_bindings import ConsumerBinding, get_consumer_binding
 from .coordinator import SolarEnergyFlowCoordinator
 
 
@@ -102,6 +105,7 @@ class SolarEnergyFlowConsumerSwitch(RestoreEntity, SwitchEntity):
         self._entry = entry
         self._consumer = consumer
         self._is_on: bool = False
+        self._binding: ConsumerBinding | None = None
         self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{consumer[CONSUMER_ID]}_enabled"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{consumer[CONSUMER_ID]}")},
@@ -113,20 +117,42 @@ class SolarEnergyFlowConsumerSwitch(RestoreEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self._binding = get_consumer_binding(self.hass, self._entry.entry_id, self._consumer)
         last_state = await self.async_get_last_state()
         if last_state is not None:
             self._is_on = last_state.state == "on"
+        elif self._binding is not None:
+            actual_state = self._binding.get_effective_enabled(self.hass)
+            if actual_state is not None:
+                self._is_on = actual_state
 
     @property
     def is_on(self) -> bool:
+        if self._binding is not None:
+            actual_state = self._binding.get_effective_enabled(self.hass)
+            if actual_state is not None:
+                self._is_on = actual_state
         return self._is_on
 
     async def async_turn_on(self, **kwargs) -> None:
-        self._is_on = True
-        self.async_write_ha_state()
+        await self._async_set_enabled(True)
 
     async def async_turn_off(self, **kwargs) -> None:
-        self._is_on = False
+        await self._async_set_enabled(False)
+
+    async def _async_set_enabled(self, enabled: bool) -> None:
+        self._is_on = enabled
+        if self._binding is None:
+            self.async_write_ha_state()
+            return
+
+        await self._binding.async_set_enabled(self.hass, enabled)
+        actual_state = self._binding.get_effective_enabled(self.hass)
+        self._is_on = enabled if actual_state is None else actual_state
+
+        if self._consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
+            await self._binding.async_push_power(self.hass)
+
         self.async_write_ha_state()
 
 

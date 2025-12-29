@@ -76,7 +76,7 @@ class PID:
             dt = max(1e-6, now - self._prev_t)
 
         # Derivative (on measurement to reduce derivative kick)
-        if self._prev_pv is None or dt == 0.0:
+        if self._prev_pv is None or dt < 1e-4:
             d_pv = 0.0
         else:
             d_pv = (pv - self._prev_pv) / dt

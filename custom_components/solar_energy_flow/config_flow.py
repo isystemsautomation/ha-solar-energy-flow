@@ -338,9 +338,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     output_epsilon_val = float(output_epsilon)
                 except (TypeError, ValueError):
                     errors["base"] = "invalid_output_epsilon"
-            else:
-                if output_epsilon_val < 0:
-                    errors["base"] = "invalid_output_epsilon"
+                else:
+                    if output_epsilon_val < 0:
+                        errors["base"] = "invalid_output_epsilon"
 
             if "base" not in errors:
                 if not self._validate_range(cleaned[CONF_PV_MIN], cleaned[CONF_PV_MAX]):

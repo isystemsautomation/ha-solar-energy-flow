@@ -978,10 +978,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         if runtime_mode != RUNTIME_MODE_MANUAL_OUT and output_raw is not None:
             self._manual_out_value = output_raw
 
-        term_factor = output_span / 100.0 if output_span > 0 else None
-        p_term_raw = step_result.p_term * term_factor if term_factor is not None else None
-        i_term_raw = step_result.i_term * term_factor if term_factor is not None else None
-        d_term_raw = step_result.d_term * term_factor if term_factor is not None else None
+        p_term_pct = step_result.p_term
+        i_term_pct = step_result.i_term
+        d_term_pct = step_result.d_term
 
         self._previous_runtime_mode = runtime_mode
         self._log_runtime_mode_change(prev_runtime_mode, runtime_mode, setpoint.manual_sp_value, manual_sp_display_value)
@@ -997,9 +996,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             status=status,
             limiter_state=limiter_result.limiter_state,
             manual_out_value=self._manual_out_value,
-            p_term=p_term_raw,
-            i_term=i_term_raw,
-            d_term=d_term_raw,
+            p_term=p_term_pct,
+            i_term=i_term_pct,
+            d_term=d_term_pct,
         )
 
     async def _async_update_data(self) -> FlowState:

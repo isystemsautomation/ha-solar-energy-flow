@@ -1,11 +1,12 @@
 {
   "domain": "solar_energy_flow",
   "name": "Solar Energy Flow Controller",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "documentation": "https://github.com/isystemsautomation/ha-solar-energy-flow/",
     "issue_tracker": "https://github.com/isystemsautomation/ha-solar-energy-flow/issues",
   "requirements": [],
   "codeowners": ["@isystemsautomation"],
   "config_flow": true,
+  "iot_class": "local_polling",
   "integration_type": "hub"
 }

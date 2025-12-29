@@ -8,7 +8,7 @@
 
 A **PID-based control integration for Home Assistant** that regulates a numeric output entity based on a measured process value and a setpoint, with optional grid import/export limiting.
 
-Designed for **energy flow control** scenarios such as inverter power limiting, load control, or grid balancing.
+Designed for **energy flow control** scenarios such as inverter power limiting, load control, EV charging, or grid balancing.
 
 ---
 
@@ -42,31 +42,45 @@ Designed for **energy flow control** scenarios such as inverter power limiting, 
 
 ## Initial Configuration
 
-During setup you must select:
+During setup you must select the entities used by the controller.
+
+![Initial configuration](images/Configuration1.png)
 
 | Item | Description | Supported Domains |
 |---|---|---|
 | Process Value (PV) | Measured value for control | `sensor`, `number`, `input_number` |
 | Setpoint (SP) | Target value | `number`, `input_number` |
 | Output | Controlled output | `number`, `input_number` |
-| Grid Power | Grid power measurement | `sensor`, `number`, `input_number` |
+| Grid Power | Grid power measurement (optional) | `sensor`, `number`, `input_number` |
 
 Invalid entity domains are rejected during setup.
 
-### Wiring Options (Configure dialog)
+---
 
-After installation you can adjust how signals are interpreted:
+## Wiring & PID Direction
 
-- **Invert PV** – flips the sign of the process value (PV) if your meter reports the opposite direction.
-- **Invert SP** – flips the setpoint if a negative target is required.
-- **Invert Grid Power** – flips the sign of the grid power measurement to match your hardware’s convention.
-- **PID mode (direct / reverse)** – choose controller action so that positive error drives the output in the correct direction for your device.
+After installation, you can configure signal interpretation and controller behavior.
+
+![PID wiring and mode](images/Configuration2.png)
+
+### Options
+- **Invert PV** – flips the sign of the process value if your meter reports the opposite direction
+- **Invert SP** – flips the setpoint sign
+- **Invert Grid Power** – flips grid power sign to match hardware conventions
+- **PID mode**
+  - **Direct** – increasing error increases output
+  - **Reverse** – increasing error decreases output
+- **Update interval** – control loop execution interval (seconds)
 
 ---
 
-## Runtime Modes
+## Runtime Controls
 
-Selectable via a **Select** entity.
+Runtime controls allow switching modes and manually overriding behavior.
+
+![Runtime controls](images/Configuration3.png)
+
+### Runtime Modes
 
 | Mode | Description |
 |---|---|
@@ -75,39 +89,15 @@ Selectable via a **Select** entity.
 | **MANUAL OUT** | User directly controls output |
 | **HOLD** | Output frozen at last value |
 
-Mode changes attempt to avoid output jumps using bumpless transfer.
+Mode transitions use **bumpless transfer** to avoid output jumps.
 
 ---
 
-## Grid Limiter
+## Live Sensors & PID Internals
 
-Optional limiter that modifies the effective PID setpoint based on grid power.
+The integration exposes detailed runtime sensors for transparency and tuning.
 
-### Limiter Types
-- **Import** – limits grid import above a threshold
-- **Export** – limits grid export beyond a threshold
-
-### Characteristics
-- Uses hysteresis (deadband)
-- Alters PID inputs, not the PID algorithm itself
-- Limiter state is exposed as a diagnostic sensor
-
----
-
-## Rate Limiter
-
-When enabled:
-- Limits output change per second
-- Applied after PID saturation
-- Prevents rapid output swings
-
-Configured via:
-- Rate limiter enabled (switch)
-- Rate limit (number, units: points/s)
-
----
-
-## Entities Created
+![Sensors](images/Configuration4.png)
 
 ### Sensors
 - Effective SP
@@ -120,32 +110,41 @@ Configured via:
 - Limiter state (diagnostic)
 - Status
 
-### Number Entities
+---
 
-**Configuration**
+## Configuration Parameters
+
+All tuning and limiter parameters are available as number and switch entities.
+
+![Configuration parameters](images/Configuration5.png)
+
+### PID & Limits
 - Kp, Ki, Kd
+- PID deadband
 - Min output
 - Max output
-- PID deadband
+
+### Grid Limiter
+- Grid limiter enabled
+- Grid limiter type (import / export)
 - Grid limiter limit
 - Grid limiter deadband
-- Rate limit
 
-**Runtime**
-- Manual SP
-- Manual OUT
-
-Manual numbers are only writable when the corresponding runtime mode is active.  
-Otherwise, edits are rejected and values snap back.
-
-### Select Entities
-- Runtime mode
-- Grid limiter type (import / export)
-
-### Switch Entities
-- Enabled
-- Grid limiter enabled
+### Rate Limiter
 - Rate limiter enabled
+- Rate limit (points/s)
+
+---
+
+## Diagnostic Information
+
+Additional diagnostic entities help understand controller behavior.
+
+![Diagnostics](images/Configuration6.png)
+
+### Diagnostic Entities
+- Limiter state
+- Output (pre rate limit)
 
 ---
 
@@ -164,7 +163,7 @@ The `Status` sensor may report:
 - `limiting_export`
 - `output_write_failed`
 
-These reflect internal controller and error states.
+These reflect internal controller state and error conditions.
 
 ---
 
@@ -180,9 +179,9 @@ These reflect internal controller and error states.
 ## Limitations
 
 - Output entity **must** be `number` or `input_number`
-- Designed for slow energy systems, not real-time control
+- Designed for slow energy systems (seconds-level dynamics)
+- Not intended for real-time control
 - No YAML configuration
-- Safety limits rely on correct configuration of min/max output
 
 ---
 
@@ -191,8 +190,3 @@ These reflect internal controller and error states.
 - Issues: https://github.com/isystemsautomation/ha-solar-energy-flow/issues
 - Documentation: https://github.com/isystemsautomation/ha-solar-energy-flow/
 
----
-
-## License
-
-MIT

@@ -53,6 +53,15 @@ During setup you must select:
 
 Invalid entity domains are rejected during setup.
 
+### Wiring Options (Configure dialog)
+
+After installation you can adjust how signals are interpreted:
+
+- **Invert PV** – flips the sign of the process value (PV) if your meter reports the opposite direction.
+- **Invert SP** – flips the setpoint if a negative target is required.
+- **Invert Grid Power** – flips the sign of the grid power measurement to match your hardware’s convention.
+- **PID mode (direct / reverse)** – choose controller action so that positive error drives the output in the correct direction for your device.
+
 ---
 
 ## Runtime Modes

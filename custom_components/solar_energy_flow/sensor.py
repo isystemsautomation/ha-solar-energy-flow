@@ -58,6 +58,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         SolarEnergyFlowOutputPreRateLimitSensor(coordinator, entry),
         EnergyDividerPIDOutputPctSensor(coordinator, entry),
         EnergyDividerDeltaWSensor(coordinator, entry),
+        EnergyDividerActiveConsumerSensor(coordinator, entry),
+        EnergyDividerActivePrioritySensor(coordinator, entry),
         EnergyDividerConsumersSummarySensor(coordinator, entry, consumers),
     ]
 
@@ -297,6 +299,39 @@ class EnergyDividerDeltaWSensor(_BaseDividerSensor):
     @property
     def native_value(self):
         return getattr(self.coordinator, "delta_w", None)
+
+
+class EnergyDividerActiveConsumerSensor(_BaseDividerSensor):
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "Active controlled consumer",
+            "divider_active_consumer",
+            EntityCategory.DIAGNOSTIC,
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        name = getattr(self.coordinator, "active_controlled_consumer_name", None)
+        return name if name is not None else "None"
+
+
+class EnergyDividerActivePrioritySensor(_BaseDividerSensor):
+    _attr_icon = "mdi:order-numeric-ascending"
+
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "Active consumer priority",
+            "divider_active_priority",
+            EntityCategory.DIAGNOSTIC,
+        )
+
+    @property
+    def native_value(self):
+        return getattr(self.coordinator, "active_controlled_consumer_priority", None)
 
 
 class EnergyDividerConsumersSummarySensor(_BaseDividerSensor):

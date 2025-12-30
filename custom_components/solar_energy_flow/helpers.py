@@ -12,9 +12,12 @@ ENTRY_DATA_CONSUMER_RUNTIME = "consumer_runtime"
 
 RUNTIME_FIELD_CMD_W = "cmd_w"
 RUNTIME_FIELD_IS_ON = "is_on"
+RUNTIME_FIELD_ENABLED = "enabled"
 RUNTIME_FIELD_START_TIMER_S = "start_timer_s"
 RUNTIME_FIELD_STOP_TIMER_S = "stop_timer_s"
 RUNTIME_FIELD_REASON = "reason"
+RUNTIME_FIELD_IS_ACTIVE = "is_active"
+RUNTIME_FIELD_STEP_CHANGE_REQUEST = "step_change_request"  # "next", "previous", or None
 
 
 def consumer_runtime_updated_signal(entry_id: str) -> str:
@@ -47,16 +50,22 @@ def get_consumer_runtime(hass: HomeAssistant, entry_id: str, consumer_id: str) -
         {
             RUNTIME_FIELD_CMD_W: 0.0,
             RUNTIME_FIELD_IS_ON: False,
+            RUNTIME_FIELD_ENABLED: True,
             RUNTIME_FIELD_START_TIMER_S: 0.0,
             RUNTIME_FIELD_STOP_TIMER_S: 0.0,
             RUNTIME_FIELD_REASON: "",
+            RUNTIME_FIELD_IS_ACTIVE: False,
+            RUNTIME_FIELD_STEP_CHANGE_REQUEST: None,
         },
     )
     consumer_state.setdefault(RUNTIME_FIELD_CMD_W, 0.0)
     consumer_state.setdefault(RUNTIME_FIELD_IS_ON, False)
+    consumer_state.setdefault(RUNTIME_FIELD_ENABLED, True)
     consumer_state.setdefault(RUNTIME_FIELD_START_TIMER_S, 0.0)
     consumer_state.setdefault(RUNTIME_FIELD_STOP_TIMER_S, 0.0)
     consumer_state.setdefault(RUNTIME_FIELD_REASON, "")
+    consumer_state.setdefault(RUNTIME_FIELD_IS_ACTIVE, False)
+    consumer_state.setdefault(RUNTIME_FIELD_STEP_CHANGE_REQUEST, None)
     return consumer_state
 
 

@@ -19,6 +19,7 @@ from .const import (
     CONF_CONSUMERS,
     CONSUMER_DEVICE_SUFFIX,
     CONSUMER_ID,
+    CONSUMER_TYPE_BINARY,
     CONSUMER_MAX_POWER_W,
     CONSUMER_MIN_POWER_W,
     CONSUMER_NAME,
@@ -26,6 +27,8 @@ from .const import (
     CONSUMER_DEFAULT_ASSUMED_POWER_W,
     CONSUMER_TYPE,
     CONSUMER_TYPE_CONTROLLED,
+    CONSUMER_PRIORITY,
+    CONSUMER_STATE_ENTITY_ID,
     DOMAIN,
     DIVIDER_DEVICE_SUFFIX,
     HUB_DEVICE_SUFFIX,
@@ -337,11 +340,11 @@ class EnergyDividerPIDOutputPctSensor(_BaseDividerSensor):
         try:
             value = getattr(self.coordinator, "pid_output_pct", None)
             if value is None:
-                return None
+                return 50.0  # Safe fallback: PID neutral position
             return round(float(value), 1)
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.exception("Failed to read PID output for %s: %s", self._entry.entry_id, err)
-            return None
+            return 50.0  # Safe fallback: PID neutral position
 
 
 class EnergyDividerDeltaWSensor(_BaseDividerSensor):
@@ -354,10 +357,10 @@ class EnergyDividerDeltaWSensor(_BaseDividerSensor):
     def native_value(self):
         try:
             value = getattr(self.coordinator, "delta_w", None)
-            return float(value) if value is not None else None
+            return float(value) if value is not None else 0.0
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.exception("Failed to read delta W for %s: %s", self._entry.entry_id, err)
-            return None
+            return 0.0  # Safe fallback: no surplus/deficit
 
 
 class EnergyDividerActiveConsumerSensor(_BaseDividerSensor):
@@ -365,7 +368,7 @@ class EnergyDividerActiveConsumerSensor(_BaseDividerSensor):
         super().__init__(
             coordinator,
             entry,
-            "Active controlled consumer",
+            "Active consumer",
             "divider_active_consumer",
             EntityCategory.DIAGNOSTIC,
         )
@@ -397,7 +400,9 @@ class EnergyDividerActivePrioritySensor(_BaseDividerSensor):
     @property
     def native_value(self):
         try:
-            priority = getattr(self.coordinator, "active_controlled_consumer_priority", None)
+            # Read from active_priority directly, not active_controlled_consumer_priority
+            # because active_priority can be for any consumer type (controlled or binary)
+            priority = getattr(self.coordinator, "active_priority", None)
             if priority is None:
                 return "-"
             if isinstance(priority, (int, float)):
@@ -506,7 +511,7 @@ class EnergyDividerConsumersSummarySensor(_BaseDividerRuntimeSensor):
                 formatted = self._format_consumer(consumer)
                 if formatted:
                     entries.append(formatted)
-            summary = "; ".join(entries)
+            summary = "\n".join(entries)
             if not summary:
                 return "empty"
             return self._truncate(summary)
@@ -647,7 +652,7 @@ class EnergyDividerPriorityListSensor(_BaseDividerRuntimeSensor):
             if not entries:
                 return "empty"
 
-            return self._truncate("; ".join(entries))
+            return self._truncate("\n".join(entries))
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.exception("Failed to build priority list for %s: %s", self._entry.entry_id, err)
             return "error"
@@ -804,17 +809,56 @@ class ConsumerStateSensor(_BaseConsumerRuntimeSensor):
     def __init__(self, entry: ConfigEntry, consumer: dict) -> None:
         super().__init__(entry, consumer, "State", "state")
         self._consumer_type = consumer.get(CONSUMER_TYPE)
+        self._state_entity_id = consumer.get(CONSUMER_STATE_ENTITY_ID)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Subscribe to state changes from state_entity_id if available (for both binary and controlled consumers)
+        if self._state_entity_id:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [self._state_entity_id], self._handle_state_entity_change
+                )
+            )
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_state_entity_change(self, event) -> None:
+        """Handle state change from state_entity_id."""
+        self.async_write_ha_state()
 
     @property
     def native_value(self):
-        coordinator = getattr(self, "coordinator", None)
-        if coordinator is None:
-            return "OFF"
-        runtime_store = getattr(coordinator, "consumer_runtime", None)
-        runtime = runtime_store.get(self._consumer_id, {}) if isinstance(runtime_store, dict) else {}
+        # Read state from state_entity_id if available (for both binary and controlled consumers)
+        if self._state_entity_id:
+            hass = self.hass
+            if hass:
+                state_obj = hass.states.get(self._state_entity_id)
+                if state_obj:
+                    value = state_obj.state
+                    if isinstance(value, str):
+                        lowered = value.lower()
+                        if lowered in ("on", "true", "home", "open", "1", "enabled"):
+                            return "ON" if self._consumer_type == CONSUMER_TYPE_BINARY else "RUNNING"
+                        if lowered in ("off", "false", "not_home", "closed", "0", "disabled"):
+                            return "OFF"
+                    # For numeric values, treat > 0 as ON/RUNNING
+                    try:
+                        num = float(value)
+                        if num > 0:
+                            return "ON" if self._consumer_type == CONSUMER_TYPE_BINARY else "RUNNING"
+                        return "OFF"
+                    except (TypeError, ValueError):
+                        pass
+        
+        # Fallback to runtime state for binary consumers
         if self._consumer_type == CONSUMER_TYPE_BINARY:
+            runtime = self._runtime()
             is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
-            return "RUNNING" if is_on else "OFF"
+            return "ON" if is_on else "OFF"
+        
+        # Fallback to runtime state for controlled consumers
+        runtime = self._runtime()
         try:
             cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W) or 0.0)
         except (TypeError, ValueError):

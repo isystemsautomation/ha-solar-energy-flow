@@ -4,7 +4,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -33,7 +33,8 @@ from .const import (
 )
 from .consumer_bindings import ConsumerBinding, get_consumer_binding
 from .coordinator import SolarEnergyFlowCoordinator
-from .helpers import get_entry_coordinator
+from .helpers import get_entry_coordinator, get_consumer_runtime, RUNTIME_FIELD_ENABLED, async_dispatch_consumer_runtime_update, consumer_runtime_updated_signal
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -157,21 +158,37 @@ class SolarEnergyFlowConsumerSwitch(RestoreEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self._binding = get_consumer_binding(self.hass, self._entry.entry_id, self._consumer)
+        consumer_id = self._consumer.get(CONSUMER_ID)
+        runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
         last_state = await self.async_get_last_state()
         if last_state is not None:
             self._is_on = last_state.state == "on"
-        elif self._binding is not None:
-            actual_state = self._binding.get_effective_enabled(self.hass)
-            if actual_state is not None:
-                self._is_on = actual_state
+            runtime[RUNTIME_FIELD_ENABLED] = self._is_on
+        else:
+            self._is_on = bool(runtime.get(RUNTIME_FIELD_ENABLED, True))
+        
+        # Subscribe to runtime updates to refresh switch state
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                consumer_runtime_updated_signal(self._entry.entry_id),
+                self._handle_runtime_update,
+            )
+        )
+        self.async_write_ha_state()
+    
+    @callback
+    def _handle_runtime_update(self, consumer_id: str) -> None:
+        """Handle runtime update for this consumer."""
+        if consumer_id == self._consumer.get(CONSUMER_ID):
+            self.async_write_ha_state()
 
     @property
     def is_on(self) -> bool:
-        if self._binding is not None:
-            actual_state = self._binding.get_effective_enabled(self.hass)
-            if actual_state is not None:
-                self._is_on = actual_state
+        consumer_id = self._consumer.get(CONSUMER_ID)
+        if consumer_id:
+            runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
+            self._is_on = bool(runtime.get(RUNTIME_FIELD_ENABLED, True))
         return self._is_on
 
     async def async_turn_on(self, **kwargs) -> None:
@@ -181,18 +198,16 @@ class SolarEnergyFlowConsumerSwitch(RestoreEntity, SwitchEntity):
         await self._async_set_enabled(False)
 
     async def _async_set_enabled(self, enabled: bool) -> None:
+        """Set the internal enabled state (does not control physical device)."""
         self._is_on = enabled
-        if self._binding is None:
-            self.async_write_ha_state()
-            return
-
-        await self._binding.async_set_enabled(self.hass, enabled)
-        actual_state = self._binding.get_effective_enabled(self.hass)
-        self._is_on = enabled if actual_state is None else actual_state
-
-        if self._consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
-            await self._binding.async_push_power(self.hass)
-
+        consumer_id = self._consumer.get(CONSUMER_ID)
+        if consumer_id:
+            runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
+            runtime[RUNTIME_FIELD_ENABLED] = enabled
+            async_dispatch_consumer_runtime_update(self.hass, self._entry.entry_id, consumer_id)
+            # Request coordinator refresh so it can immediately react to enabled state change
+            coordinator = get_entry_coordinator(self.hass, self._entry.entry_id)
+            await coordinator.async_request_refresh()
         self.async_write_ha_state()
 
 

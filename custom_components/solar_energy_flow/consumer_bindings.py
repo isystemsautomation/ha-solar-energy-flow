@@ -106,9 +106,8 @@ class ConsumerBinding:
         return self._assumed_enabled
 
     async def async_set_enabled(self, hass: HomeAssistant, desired_enabled: bool) -> bool:
-        actual_enabled = self.get_effective_enabled(hass)
-        if actual_enabled is not None and desired_enabled == actual_enabled:
-            return False
+        # Always send command when requested by the coordinator - don't skip based on current state
+        # The state sensor will read the actual device state from state_entity_id
         if self._rate_limited(self._last_enable_command_at):
             _LOGGER.debug(
                 "Enable command for consumer %s skipped due to rate limit", self.consumer.get(CONSUMER_ID)

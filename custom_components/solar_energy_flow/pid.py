@@ -50,6 +50,10 @@ class PID:
         self._prev_t = None
         self._prev_error = None
 
+    def reset_prev_pv(self) -> None:
+        """Reset previous PV to None (e.g., when switching between different PV ranges)."""
+        self._prev_pv = None
+
     def apply_options(self, cfg: PIDConfig) -> None:
         """Apply new tuning without resetting accumulated state."""
 

@@ -22,6 +22,8 @@ from .const import (
     CONSUMER_MAX_POWER_W,
     CONSUMER_MIN_POWER_W,
     CONSUMER_NAME,
+    CONSUMER_ASSUMED_POWER_W,
+    CONSUMER_DEFAULT_ASSUMED_POWER_W,
     CONSUMER_TYPE,
     CONSUMER_TYPE_CONTROLLED,
     DOMAIN,
@@ -92,6 +94,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(ConsumerReasonSensor(entry, consumer))
         if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
             entities.append(ConsumerCommandedPowerSensor(entry, consumer))
+        elif consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_BINARY:
+            entities.append(ConsumerAssumedPowerSensor(entry, consumer))
 
     async_add_entities(entities)
 
@@ -452,6 +456,13 @@ class EnergyDividerConsumersSummarySensor(_BaseDividerRuntimeSensor):
             return value
         return value[:252] + "..."
 
+    @staticmethod
+    def _assumed_power_w(consumer: dict) -> float:
+        try:
+            return float(consumer.get(CONSUMER_ASSUMED_POWER_W, CONSUMER_DEFAULT_ASSUMED_POWER_W) or 0.0)
+        except (TypeError, ValueError):
+            return CONSUMER_DEFAULT_ASSUMED_POWER_W
+
     def _format_consumer(self, consumer: dict) -> str | None:
         try:
             consumer_id = consumer.get(CONSUMER_ID)
@@ -466,7 +477,11 @@ class EnergyDividerConsumersSummarySensor(_BaseDividerRuntimeSensor):
                 display_value = f"{round(float(cmd_w or 0.0))}W"
             elif consumer_type == CONSUMER_TYPE_BINARY:
                 is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
-                display_value = "RUNNING" if is_on else "OFF"
+                if is_on:
+                    assumed_power = round(self._assumed_power_w(consumer))
+                    display_value = f"ON {assumed_power}W"
+                else:
+                    display_value = "OFF"
             else:
                 binding = get_consumer_binding(self.hass, self._entry.entry_id, consumer)
                 enabled_state = binding.get_effective_enabled(self.hass) if binding is not None else None
@@ -526,6 +541,12 @@ class EnergyDividerTotalPowerSensor(_BaseDividerRuntimeSensor):
                 runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
                 if consumer_type == CONSUMER_TYPE_CONTROLLED:
                     total += self._safe_float(runtime.get(RUNTIME_FIELD_CMD_W))
+                elif consumer_type == CONSUMER_TYPE_BINARY:
+                    is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+                    if is_on:
+                        total += self._safe_float(
+                            consumer.get(CONSUMER_ASSUMED_POWER_W, CONSUMER_DEFAULT_ASSUMED_POWER_W)
+                        )
                 else:
                     total += 0.0
             except Exception as err:  # pragma: no cover - defensive
@@ -590,7 +611,15 @@ class EnergyDividerPriorityListSensor(_BaseDividerRuntimeSensor):
             else:
                 is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
                 state = "ON" if is_on else "OFF"
-                cmd_part = ""
+                assumed_power = 0.0
+                if is_on:
+                    try:
+                        assumed_power = float(
+                            consumer.get(CONSUMER_ASSUMED_POWER_W, CONSUMER_DEFAULT_ASSUMED_POWER_W) or 0.0
+                        )
+                    except (TypeError, ValueError):
+                        assumed_power = CONSUMER_DEFAULT_ASSUMED_POWER_W
+                cmd_part = f" {round(assumed_power)}W" if is_on else ""
                 type_label = "binary" if consumer_type == CONSUMER_TYPE_BINARY else "other"
 
             return f"{priority}: {name} ({type_label}) {state}{cmd_part}".strip()
@@ -825,3 +854,16 @@ class ConsumerReasonSensor(_BaseConsumerRuntimeSensor):
     def native_value(self):
         runtime = self._runtime()
         return runtime.get(RUNTIME_FIELD_REASON, "")
+
+
+class ConsumerAssumedPowerSensor(_BaseConsumerRuntimeSensor):
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(self, entry: ConfigEntry, consumer: dict) -> None:
+        super().__init__(entry, consumer, "Assumed power", "assumed_power_w")
+        self._assumed_power = float(consumer.get(CONSUMER_ASSUMED_POWER_W, CONSUMER_DEFAULT_ASSUMED_POWER_W))
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self):
+        return self._assumed_power

@@ -87,12 +87,16 @@ from .const import (
     CONSUMER_TYPE_CONTROLLED,
     CONSUMER_STEP_W,
     CONSUMER_PID_DEADBAND_PCT,
+    CONSUMER_ASSUMED_POWER_W,
     CONSUMER_DEFAULT_STEP_W,
     CONSUMER_MIN_STEP_W,
     CONSUMER_MAX_STEP_W,
     CONSUMER_DEFAULT_PID_DEADBAND_PCT,
     CONSUMER_MIN_PID_DEADBAND_PCT,
     CONSUMER_MAX_PID_DEADBAND_PCT,
+    CONSUMER_DEFAULT_ASSUMED_POWER_W,
+    CONSUMER_MIN_ASSUMED_POWER_W,
+    CONSUMER_MAX_ASSUMED_POWER_W,
 )
 
 _PV_DOMAINS = {"sensor", "number", "input_number"}
@@ -590,6 +594,13 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Required(
                         CONSUMER_OFF_THRESHOLD_W, default=defaults.get(CONSUMER_OFF_THRESHOLD_W, 0.0)
                     ): vol.Coerce(float),
+                    vol.Optional(
+                        CONSUMER_ASSUMED_POWER_W,
+                        default=defaults.get(CONSUMER_ASSUMED_POWER_W, CONSUMER_DEFAULT_ASSUMED_POWER_W),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.Range(min=CONSUMER_MIN_ASSUMED_POWER_W, max=CONSUMER_MAX_ASSUMED_POWER_W),
+                    ),
                 }
             )
 
@@ -644,6 +655,11 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 off_threshold = float(user_input.get(CONSUMER_OFF_THRESHOLD_W, 0.0))
                 if on_threshold < off_threshold:
                     errors["base"] = "invalid_threshold_range"
+                assumed_power = float(
+                    user_input.get(CONSUMER_ASSUMED_POWER_W, CONSUMER_DEFAULT_ASSUMED_POWER_W)
+                )
+                if not (CONSUMER_MIN_ASSUMED_POWER_W <= assumed_power <= CONSUMER_MAX_ASSUMED_POWER_W):
+                    errors["base"] = "invalid_consumer_settings"
             except (TypeError, ValueError):
                 errors["base"] = "invalid_threshold_range"
         return errors
@@ -671,6 +687,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         else:
             consumer[CONSUMER_ON_THRESHOLD_W] = float(user_input[CONSUMER_ON_THRESHOLD_W])
             consumer[CONSUMER_OFF_THRESHOLD_W] = float(user_input[CONSUMER_OFF_THRESHOLD_W])
+            consumer[CONSUMER_ASSUMED_POWER_W] = float(
+                user_input.get(CONSUMER_ASSUMED_POWER_W, CONSUMER_DEFAULT_ASSUMED_POWER_W)
+            )
         return consumer
 
     def _create_entry_with_consumers(self):

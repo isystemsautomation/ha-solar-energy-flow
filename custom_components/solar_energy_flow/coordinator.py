@@ -105,6 +105,8 @@ from .const import (
     CONSUMER_DEFAULT_PID_DEADBAND_PCT,
     CONSUMER_THRESHOLD_W,
     CONSUMER_DEFAULT_THRESHOLD_W,
+    CONSUMER_NAME,
+    CONSUMER_PRIORITY,
 )
 from .consumer_bindings import get_consumer_binding
 from .helpers import (
@@ -144,6 +146,9 @@ class FlowState:
     p_term: float | None
     i_term: float | None
     d_term: float | None
+    active_controlled_consumer_id: str | None
+    active_controlled_consumer_name: str | None
+    active_controlled_consumer_priority: float | None
 
 
 @dataclass
@@ -439,6 +444,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._previous_runtime_mode = self._runtime_mode
         self._invalid_output_reported = False
         self._output_write_failed_reported = False
+        self.active_controlled_consumer_id: str | None = None
+        self.active_controlled_consumer_name: str | None = None
+        self.active_controlled_consumer_priority: float | None = None
 
     def _get_normal_setpoint_value(self) -> float | None:
         """Return the current external setpoint with inversion applied (no limiter)."""
@@ -589,9 +597,18 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
     async def _async_update_controlled_consumers(
         self, consumers: list[Mapping[str, Any]], delta_w: float | None, pid_pct: float | None, dt: float
     ) -> None:
+        self.active_controlled_consumer_id = None
+        self.active_controlled_consumer_name = None
+        self.active_controlled_consumer_priority = None
+
         if pid_pct is None or delta_w is None:
             return
-        for consumer in consumers:
+
+        def _is_at_max(cmd: float, maximum: float) -> bool:
+            return cmd >= maximum or math.isclose(cmd, maximum, abs_tol=0.5)
+
+        controlled: list[dict[str, Any]] = []
+        for index, consumer in enumerate(consumers):
             if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_CONTROLLED:
                 continue
             consumer_id = consumer.get(CONSUMER_ID)
@@ -607,13 +624,76 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             stop_delay = self._get_consumer_delay_seconds(consumer_id, False)
             step_w = self._get_consumer_step_w(consumer_id, consumer)
             pid_deadband_pct = self._get_consumer_pid_deadband_pct(consumer_id, consumer)
-
             enabled = self._consumer_enabled(consumer)
             available = self._consumer_available(consumer)
+            priority = _coerce_float(consumer.get(CONSUMER_PRIORITY), float(index))
+            name = consumer.get(CONSUMER_NAME, consumer_id)
+
+            controlled.append(
+                {
+                    "consumer": consumer,
+                    "consumer_id": consumer_id,
+                    "runtime": runtime,
+                    "cmd_w": cmd_w,
+                    "start_timer": start_timer,
+                    "stop_timer": stop_timer,
+                    "min_power": min_power,
+                    "max_power": max_power,
+                    "start_delay": start_delay,
+                    "stop_delay": stop_delay,
+                    "step_w": step_w,
+                    "pid_deadband_pct": pid_deadband_pct,
+                    "enabled": enabled,
+                    "available": available,
+                    "priority": priority,
+                    "index": index,
+                    "name": name,
+                }
+            )
+
+        controlled.sort(key=lambda item: (item["priority"], item["index"]))
+
+        def _is_eligible(item: dict[str, Any]) -> bool:
+            return item["enabled"] and item["available"] and (item["cmd_w"] > 0.0 or delta_w >= item["min_power"])
+
+        active = next((item for item in controlled if _is_eligible(item)), None)
+        wants_increase = False
+        if active is not None:
+            wants_increase = pid_pct > 50.0 + active["pid_deadband_pct"]
+
+        if wants_increase:
+            active = None
+            for item in controlled:
+                if not _is_eligible(item) or _is_at_max(item["cmd_w"], item["max_power"]):
+                    continue
+                active = item
+                break
+
+        if active is not None:
+            self.active_controlled_consumer_id = active["consumer_id"]
+            self.active_controlled_consumer_name = active["name"]
+            self.active_controlled_consumer_priority = active["priority"]
+
+        for item in controlled:
+            consumer = item["consumer"]
+            consumer_id = item["consumer_id"]
+            runtime = item["runtime"]
+            cmd_w = item["cmd_w"]
+            start_timer = item["start_timer"]
+            stop_timer = item["stop_timer"]
+            min_power = item["min_power"]
+            max_power = item["max_power"]
+            start_delay = item["start_delay"]
+            stop_delay = item["stop_delay"]
+            step_w = item["step_w"]
+            pid_deadband_pct = item["pid_deadband_pct"]
+            enabled = item["enabled"]
+            available = item["available"]
 
             prev_cmd = cmd_w
-
-            step = self._compute_controlled_consumer_step(pid_pct, pid_deadband_pct, step_w)
+            step = 0.0
+            if active is not None and consumer_id == active["consumer_id"] and cmd_w > 0.0:
+                step = self._compute_controlled_consumer_step(pid_pct, pid_deadband_pct, step_w)
 
             if not enabled or not available:
                 cmd_w = 0.0
@@ -633,7 +713,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 start_timer = 0.0
                 cmd_w = max(min_power, min(max_power, cmd_w + step))
 
-                if cmd_w > 0.0 and abs(cmd_w - min_power) <= 0.5 and delta_w < 0.0:
+                if cmd_w > 0.0 and math.isclose(cmd_w, min_power, abs_tol=0.5) and delta_w < 0.0:
                     stop_timer += dt
                 else:
                     stop_timer = 0.0
@@ -1312,6 +1392,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 p_term=None,
                 i_term=None,
                 d_term=None,
+                active_controlled_consumer_id=self.active_controlled_consumer_id,
+                active_controlled_consumer_name=self.active_controlled_consumer_name,
+                active_controlled_consumer_priority=self.active_controlled_consumer_priority,
             )
 
         output_plan = self._calculate_output_plan(
@@ -1352,6 +1435,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             p_term=output_plan.p_term,
             i_term=output_plan.i_term,
             d_term=output_plan.d_term,
+            active_controlled_consumer_id=self.active_controlled_consumer_id,
+            active_controlled_consumer_name=self.active_controlled_consumer_name,
+            active_controlled_consumer_priority=self.active_controlled_consumer_priority,
         )
 
 # Manual test checklist:

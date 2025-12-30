@@ -601,18 +601,24 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             else:
                 start_timer = 0.0
                 if delta_w < 0.0:
+                    cmd_w = max(min_power, cmd_w - step_w)
+
+                if cmd_w > 0.0 and abs(cmd_w - min_power) <= 0.5 and delta_w < 0.0:
                     stop_timer += dt
                 else:
                     stop_timer = 0.0
+
                 if stop_timer >= stop_delay and stop_delay >= 0.0:
                     cmd_w = 0.0
                     stop_timer = 0.0
                     start_timer = 0.0
                 else:
-                    if pid_pct > 50.0 + pid_deadband_pct:
-                        cmd_w += step_w
-                    elif pid_pct < 50.0 - pid_deadband_pct:
-                        cmd_w -= step_w
+                    if delta_w >= 0.0:
+                        if pid_pct > 50.0 + pid_deadband_pct:
+                            cmd_w += step_w
+                        elif pid_pct < 50.0 - pid_deadband_pct:
+                            cmd_w -= step_w
+
                     cmd_w = max(min_power, min(max_power, cmd_w))
 
             runtime[RUNTIME_FIELD_CMD_W] = cmd_w

@@ -512,6 +512,17 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         default = float(consumer.get(CONSUMER_PID_DEADBAND_PCT, CONSUMER_DEFAULT_PID_DEADBAND_PCT))
         return self._read_number_entity_value(entity_id, default)
 
+    @staticmethod
+    def _compute_controlled_consumer_step(pid_pct: float, pid_deadband_pct: float, max_step_w: float) -> float:
+        d = (pid_pct - 50.0) / 50.0
+        if abs(d) <= pid_deadband_pct / 50.0:
+            return 0.0
+        raw = max_step_w * (abs(d) ** 2.0)
+        step = raw if d > 0 else -raw
+        if 0 < abs(step) < 1.0:
+            step = 1.0 if d > 0 else -1.0
+        return step
+
     def _consumer_available(self, consumer: Mapping[str, Any]) -> bool:
         power_target = consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID)
         if power_target:
@@ -584,6 +595,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
             prev_cmd = cmd_w
 
+            step = self._compute_controlled_consumer_step(pid_pct, pid_deadband_pct, step_w)
+
             if not enabled or not available:
                 cmd_w = 0.0
                 start_timer = 0.0
@@ -600,8 +613,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                     stop_timer = 0.0
             else:
                 start_timer = 0.0
-                if delta_w < 0.0:
-                    cmd_w = max(min_power, cmd_w - step_w)
+                cmd_w = max(min_power, min(max_power, cmd_w + step))
 
                 if cmd_w > 0.0 and abs(cmd_w - min_power) <= 0.5 and delta_w < 0.0:
                     stop_timer += dt
@@ -612,14 +624,6 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                     cmd_w = 0.0
                     stop_timer = 0.0
                     start_timer = 0.0
-                else:
-                    if delta_w >= 0.0:
-                        if pid_pct > 50.0 + pid_deadband_pct:
-                            cmd_w += step_w
-                        elif pid_pct < 50.0 - pid_deadband_pct:
-                            cmd_w -= step_w
-
-                    cmd_w = max(min_power, min(max_power, cmd_w))
 
             runtime[RUNTIME_FIELD_CMD_W] = cmd_w
             runtime[RUNTIME_FIELD_START_TIMER_S] = start_timer

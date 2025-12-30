@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Mapping, Any, Tuple
@@ -10,6 +11,7 @@ from typing import Mapping, Any, Tuple
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -87,6 +89,48 @@ from .const import (
     RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
+    CONF_CONSUMERS,
+    CONSUMER_DEFAULT_START_DELAY_S,
+    CONSUMER_DEFAULT_STOP_DELAY_S,
+    CONSUMER_ID,
+    CONSUMER_MAX_POWER_W,
+    CONSUMER_MIN_POWER_W,
+    CONSUMER_POWER_TARGET_ENTITY_ID,
+    CONSUMER_TYPE,
+    CONSUMER_TYPE_CONTROLLED,
+    CONSUMER_TYPE_BINARY,
+    CONSUMER_STEP_W,
+    CONSUMER_PID_DEADBAND_PCT,
+    CONSUMER_DEFAULT_STEP_W,
+    CONSUMER_DEFAULT_PID_DEADBAND_PCT,
+    CONSUMER_THRESHOLD_W,
+    CONSUMER_DEFAULT_THRESHOLD_W,
+    CONSUMER_NAME,
+    CONSUMER_PRIORITY,
+    CONSUMER_STATE_ENTITY_ID,
+    CONF_DIVIDER_ENABLED,
+    DEFAULT_DIVIDER_ENABLED,
+    DIVIDER_STATE_ACTIVE,
+    DIVIDER_STATE_DISABLED,
+    DIVIDER_STATE_IDLE,
+    DIVIDER_STATE_WAITING_START_TIMER,
+    DIVIDER_STATE_WAITING_STOP_TIMER,
+)
+from .consumer_bindings import get_consumer_binding
+from .consumer_manager import ConsumerManager
+from .helpers import (
+    ENTRY_DATA_CONSUMER_RUNTIME,
+    RUNTIME_FIELD_CMD_W,
+    RUNTIME_FIELD_IS_ACTIVE,
+    RUNTIME_FIELD_STEP_CHANGE_REQUEST,
+    RUNTIME_FIELD_IS_ON,
+    RUNTIME_FIELD_ENABLED,
+    RUNTIME_FIELD_REASON,
+    RUNTIME_FIELD_START_TIMER_S,
+    RUNTIME_FIELD_STOP_TIMER_S,
+    async_dispatch_consumer_runtime_update,
+    get_entry_data,
+    get_consumer_runtime,
 )
 from .pid import PID, PIDConfig, PIDStepResult
 
@@ -102,6 +146,8 @@ class FlowState:
     grid_power: float | None
     out: float | None
     output_pre_rate_limit: float | None
+    pid_pct: float | None
+    delta_w: float | None
     error: float | None
     enabled: bool
     status: str
@@ -113,6 +159,11 @@ class FlowState:
     p_term: float | None
     i_term: float | None
     d_term: float | None
+    active_controlled_consumer_id: str | None
+    active_controlled_consumer_name: str | None
+    active_controlled_consumer_priority: float | None
+    divider_state: str | None
+    divider_reason: str | None
 
 
 @dataclass
@@ -360,6 +411,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self.entry = entry
         self.options_cache: dict[str, Any] = dict(entry.options)
         self._runtime_mode = entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        self.consumer_runtime: dict[str, dict[str, float]] = get_entry_data(
+            hass, entry.entry_id
+        ).setdefault(ENTRY_DATA_CONSUMER_RUNTIME, {})
 
         interval = _get_update_interval_seconds(entry)
         super().__init__(
@@ -380,8 +434,12 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._limiter_state = GRID_LIMITER_STATE_NORMAL
         self._last_output_raw: float | None = None
         self._last_output_pct: float | None = None
+        self.pid_output_pct: float | None = None
+        self.delta_w: float | None = None
         self._last_pv_pct: float | None = None
         self._last_sp_pct: float | None = None
+        self._consumer_power_entities: dict[str, str | None] = {}
+        self._last_consumer_update = time.monotonic()
         manual_sp_opt = entry.options.get(CONF_MANUAL_SP_VALUE)
         self._manual_sp_value: float | None = None
         self._manual_sp_initialized = False
@@ -401,6 +459,16 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._previous_runtime_mode = self._runtime_mode
         self._invalid_output_reported = False
         self._output_write_failed_reported = False
+        self.active_controlled_consumer_id: str | None = None
+        self.active_controlled_consumer_name: str | None = None
+        self.active_controlled_consumer_priority: float | None = None
+        self.active_priority: float | None = None  # Current active priority step (1 = highest)
+        self._divider_enabled = entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
+        self._previous_divider_enabled = self._divider_enabled
+        self.divider_state: str | None = None
+        self.divider_reason: str | None = None
+        # Initialize ConsumerManager for consumer operations
+        self.consumer_manager = ConsumerManager(hass, entry.entry_id)
 
     def _get_normal_setpoint_value(self) -> float | None:
         """Return the current external setpoint with inversion applied (no limiter)."""
@@ -450,6 +518,895 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         if span <= 0:
             return 0.0
         return deadband_raw * 100.0 / span
+
+    def _get_consumer_number_entity_id(self, consumer_id: str, suffix: str) -> str | None:
+        unique_id = f"{DOMAIN}_{self.entry.entry_id}_{consumer_id}_{suffix}"
+        entity_registry = er.async_get(self.hass)
+        return entity_registry.async_get_entity_id("number", DOMAIN, unique_id)
+
+    def _read_number_entity_value(self, entity_id: str | None, default: float) -> float:
+        if not entity_id:
+            return default
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return default
+        try:
+            return float(state.state)
+        except (TypeError, ValueError):
+            return default
+
+    def _get_consumer_delay_seconds(self, consumer_id: str, is_start: bool) -> float:
+        suffix = "start_delay_s" if is_start else "stop_delay_s"
+        default = CONSUMER_DEFAULT_START_DELAY_S if is_start else CONSUMER_DEFAULT_STOP_DELAY_S
+        entity_id = self._get_consumer_number_entity_id(consumer_id, suffix)
+        return self._read_number_entity_value(entity_id, default)
+
+    def _get_consumer_step_w(self, consumer_id: str, consumer: Mapping[str, Any]) -> float:
+        entity_id = self._get_consumer_number_entity_id(consumer_id, "step_w")
+        default = float(consumer.get(CONSUMER_STEP_W, CONSUMER_DEFAULT_STEP_W))
+        return self._read_number_entity_value(entity_id, default)
+
+    def _get_consumer_pid_deadband_pct(self, consumer_id: str, consumer: Mapping[str, Any]) -> float:
+        entity_id = self._get_consumer_number_entity_id(consumer_id, "pid_deadband_pct")
+        default = float(consumer.get(CONSUMER_PID_DEADBAND_PCT, CONSUMER_DEFAULT_PID_DEADBAND_PCT))
+        return self._read_number_entity_value(entity_id, default)
+
+    def _get_consumer_threshold_w(self, consumer_id: str, consumer: Mapping[str, Any]) -> float:
+        entity_id = self._get_consumer_number_entity_id(consumer_id, CONSUMER_THRESHOLD_W)
+        default = float(consumer.get(CONSUMER_THRESHOLD_W, CONSUMER_DEFAULT_THRESHOLD_W))
+        return self._read_number_entity_value(entity_id, default)
+
+    @staticmethod
+    def _compute_controlled_consumer_step(pid_pct: float, pid_deadband_pct: float, max_step_w: float) -> float:
+        d = (pid_pct - 50.0) / 50.0
+        if abs(d) <= pid_deadband_pct / 50.0:
+            return 0.0
+        raw = max_step_w * (abs(d) ** 2.0)
+        step = raw if d > 0 else -raw
+        if 0 < abs(step) < 1.0:
+            step = 1.0 if d > 0 else -1.0
+        return step
+
+    def _consumer_available(self, consumer: Mapping[str, Any]) -> bool:
+        power_target = consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID)
+        if power_target:
+            state = self.hass.states.get(power_target)
+            if state is None or state.state in ("unavailable", "unknown"):
+                return False
+        return True
+
+    def _consumer_enabled(self, consumer: Mapping[str, Any]) -> bool:
+        """Check if consumer is enabled (internal control, not physical device state)."""
+        consumer_id = consumer.get(CONSUMER_ID)
+        if consumer_id is None:
+            return False
+        runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+        return bool(runtime.get(RUNTIME_FIELD_ENABLED, True))
+
+    @staticmethod
+    def _format_timer_remaining(total: float, elapsed: float) -> float:
+        return max(0.0, total - elapsed)
+
+    def _set_consumer_reason(self, consumer_id: str, reason: str | None) -> None:
+        runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+        runtime[RUNTIME_FIELD_REASON] = reason or ""
+
+    def _compute_dt(self) -> float:
+        now = time.monotonic()
+        dt = max(0.0, now - self._last_consumer_update)
+        self._last_consumer_update = now
+        return dt
+
+    async def _async_command_consumer_power(self, consumer: Mapping[str, Any], value: float) -> None:
+        consumer_id = consumer.get(CONSUMER_ID)
+        if consumer_id is None:
+            return
+
+        if consumer_id not in self._consumer_power_entities:
+            self._consumer_power_entities[consumer_id] = self._get_consumer_number_entity_id(consumer_id, "power")
+        power_entity_id = self._consumer_power_entities.get(consumer_id)
+
+        if power_entity_id:
+            try:
+                await self.hass.services.async_call(
+                    "number", "set_value", {"entity_id": power_entity_id, "value": value}, blocking=True
+                )
+                return
+            except (HomeAssistantError, asyncio.TimeoutError, ValueError) as err:
+                _LOGGER.warning(
+                    "Failed to update consumer power entity %s for %s: %s", power_entity_id, consumer_id, err
+                )
+
+        binding = get_consumer_binding(self.hass, self.entry.entry_id, consumer)
+        binding.set_desired_power(value)
+        await binding.async_push_power(self.hass)
+
+    async def _async_command_consumer_enabled(self, consumer: Mapping[str, Any], enabled: bool) -> None:
+        binding = get_consumer_binding(self.hass, self.entry.entry_id, consumer)
+        await binding.async_set_enabled(self.hass, enabled)
+
+    @staticmethod
+    def _is_at_max(cmd: float, maximum: float) -> bool:
+        """Check if command value is at maximum."""
+        return cmd >= maximum or math.isclose(cmd, maximum, abs_tol=0.5)
+
+    def _read_physical_device_state(self, consumer: Mapping[str, Any]) -> bool | None:
+        """Read the actual physical device state from state_entity_id.
+        
+        Returns:
+            True if device is ON/RUNNING, False if OFF, None if unavailable/not configured.
+        """
+        state_entity_id = consumer.get(CONSUMER_STATE_ENTITY_ID)
+        if not state_entity_id:
+            return None
+        
+        state_obj = self.hass.states.get(state_entity_id)
+        if state_obj is None or state_obj.state in ("unknown", "unavailable"):
+            return None
+        
+        value = state_obj.state
+        if isinstance(value, str):
+            lowered = value.lower()
+            if lowered in ("on", "true", "home", "open", "1", "enabled"):
+                return True
+            if lowered in ("off", "false", "not_home", "closed", "0", "disabled"):
+                return False
+        
+        # For numeric values, treat > 0 as ON
+        try:
+            num = float(value)
+            return num > 0
+        except (TypeError, ValueError):
+            return None
+
+    def _read_physical_device_power(self, consumer: Mapping[str, Any]) -> float | None:
+        """Read the actual physical device power from power_target_entity_id.
+        
+        Returns:
+            Power in watts, or None if unavailable/not configured.
+        """
+        power_entity_id = consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID)
+        if not power_entity_id:
+            return None
+        
+        state_obj = self.hass.states.get(power_entity_id)
+        if state_obj is None or state_obj.state in ("unknown", "unavailable"):
+            return None
+        
+        try:
+            return float(state_obj.state)
+        except (TypeError, ValueError):
+            return None
+
+    def _is_consumer_finished_starting(self, consumer: Mapping[str, Any]) -> bool:
+        """Check if consumer has finished starting based on physical device state.
+        
+        For controlled consumers: device must be ON and at MAX power.
+        For binary consumers: device must be ON.
+        """
+        consumer_type = consumer.get(CONSUMER_TYPE)
+        device_on = self._read_physical_device_state(consumer)
+        
+        if device_on is None:
+            # Fallback to runtime state if physical state unavailable
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                return False
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            
+            if consumer_type == CONSUMER_TYPE_CONTROLLED:
+                cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W, 0.0))
+                max_power = float(consumer.get(CONSUMER_MAX_POWER_W, 0.0))
+                return self._is_at_max(cmd_w, max_power)
+            else:  # binary
+                return bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+        
+        if not device_on:
+            return False  # Device is OFF, not finished starting
+        
+        if consumer_type == CONSUMER_TYPE_CONTROLLED:
+            # For controlled consumers, also check if at max power
+            actual_power = self._read_physical_device_power(consumer)
+            max_power = float(consumer.get(CONSUMER_MAX_POWER_W, 0.0))
+            if actual_power is not None and max_power > 0:
+                return self._is_at_max(actual_power, max_power)
+            # Fallback to runtime cmd_w if power entity unavailable
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                return False
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W, 0.0))
+            return self._is_at_max(cmd_w, max_power)
+        
+        # Binary consumer is ON
+        return True
+
+    def _is_consumer_finished_stopping(self, consumer: Mapping[str, Any]) -> bool:
+        """Check if consumer has finished stopping based on physical device state.
+        
+        Device must be OFF.
+        """
+        device_on = self._read_physical_device_state(consumer)
+        
+        if device_on is None:
+            # Fallback to runtime state if physical state unavailable
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                return True  # Assume finished if can't determine
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            consumer_type = consumer.get(CONSUMER_TYPE)
+            
+            if consumer_type == CONSUMER_TYPE_CONTROLLED:
+                cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W, 0.0))
+                return cmd_w <= 0.0
+            else:  # binary
+                return not bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+        
+        # Device is OFF, finished stopping
+        return not device_on
+
+    def _are_all_higher_priority_consumers_finished(
+        self, consumers: list[Mapping[str, Any]], current_priority: float, current_index: int
+    ) -> bool:
+        """Check if all higher-priority consumers (both controlled and binary) are finished.
+        
+        For controlled consumers: "finished" means at MAX power.
+        For binary consumers: "finished" means started (ON).
+        
+        Returns True if all higher-priority consumers are finished or if there are none.
+        """
+        for consumer in consumers:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            
+            # Skip if disabled or unavailable (don't block)
+            enabled = self._consumer_enabled(consumer)
+            available = self._consumer_available(consumer)
+            if not enabled or not available:
+                continue
+            
+            priority = _coerce_float(consumer.get(CONSUMER_PRIORITY), 999.0)
+            # Get index from consumers list for tie-breaking
+            index = consumers.index(consumer)
+            
+            # Only check consumers with higher priority (lower priority number)
+            # If priority matches, use index for tie-breaking (lower index = higher priority)
+            if priority > current_priority or (priority == current_priority and index >= current_index):
+                continue
+            
+            # Check if this higher-priority consumer has finished starting (using physical device state)
+            if not self._is_consumer_finished_starting(consumer):
+                return False  # This higher-priority consumer has not finished starting
+        
+        return True  # All higher-priority consumers are finished
+
+    def _are_all_lower_priority_consumers_finished_stopping(
+        self, consumers: list[Mapping[str, Any]], current_priority: float, current_index: int
+    ) -> bool:
+        """Check if all lower-priority consumers have finished stopping (device is OFF).
+        
+        Used for reverse shutdown sequence (N→1).
+        
+        Returns True if all lower-priority consumers have finished stopping or if there are none.
+        For the lowest-priority consumer (highest priority number), this always returns True
+        because there are no lower-priority consumers to wait for.
+        """
+        for consumer in consumers:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            
+            # Skip if disabled or unavailable (don't block)
+            enabled = self._consumer_enabled(consumer)
+            available = self._consumer_available(consumer)
+            if not enabled or not available:
+                continue
+            
+            priority = self.consumer_manager.get_priority(consumer)
+            # Get index from consumers list for tie-breaking
+            index = consumers.index(consumer)
+            
+            # Only check consumers with lower priority (higher priority number)
+            # If priority matches, use index for tie-breaking (higher index = lower priority)
+            if priority < current_priority or (priority == current_priority and index <= current_index):
+                continue
+            
+            # Check if this lower-priority consumer has finished stopping (using physical device state)
+            if not self._is_consumer_finished_stopping(consumer):
+                return False  # This lower-priority consumer has not finished stopping
+        
+        # If no lower-priority consumers found, this is the lowest-priority consumer
+        # It doesn't need to wait for anyone, so return True
+        return True  # All lower-priority consumers have finished stopping (or there are none)
+
+    def _get_next_priority(
+        self, consumers: list[Mapping[str, Any]], current_priority: float | None
+    ) -> float | None:
+        """Get the next higher priority number from consumers list.
+        
+        Returns None if current_priority is None or no higher priority exists.
+        """
+        if current_priority is None:
+            # Find lowest priority number (highest priority) - only check enabled, not available
+            enabled_priorities = self._collect_enabled_priorities(consumers, use_cache=True)
+            if enabled_priorities:
+                return min(enabled_priorities)
+            return None
+        
+        # Find next higher priority number (only check enabled, not available)
+        # active_priority can be set to an enabled consumer even if it's currently unavailable
+        next_priority = None
+        enabled_priorities_list = self._collect_enabled_priorities(consumers, use_cache=True)
+        for priority in enabled_priorities_list:
+            if priority > current_priority:
+                if next_priority is None or priority < next_priority:
+                    next_priority = priority
+        
+        if next_priority is None:
+            _LOGGER.warning(
+                f"_get_next_priority: No next priority found for current={current_priority}. "
+                f"Enabled priorities: {sorted(enabled_priorities_list)}"
+            )
+        
+        return next_priority
+
+    def _collect_enabled_priorities(
+        self, consumers: list[Mapping[str, Any]], use_cache: bool = True
+    ) -> list[float]:
+        """Collect unique enabled consumer priorities.
+        
+        Delegates to ConsumerManager for consistency and caching.
+        """
+        return self.consumer_manager.collect_enabled_priorities(consumers, use_cache=use_cache)
+
+    def _validate_and_fix_active_priority(
+        self, enabled_priorities: list[float]
+    ) -> bool:
+        """Validate and fix active_priority if invalid.
+        
+        Returns True if active_priority was changed, False otherwise.
+        """
+        if not enabled_priorities:
+            return False
+        
+        # Check if current active_priority is valid
+        is_valid = False
+        if self.active_priority is not None and self.active_priority > 0:
+            for ep in enabled_priorities:
+                if abs(ep - self.active_priority) < 0.01:
+                    is_valid = True
+                    break
+        
+        if not is_valid or self.active_priority is None or self.active_priority <= 0:
+            # Set to minimum enabled priority (highest priority number = priority 1)
+            old_priority = self.active_priority
+            self.active_priority = min(enabled_priorities)
+            _LOGGER.debug(
+                f"Setting active_priority: {old_priority} -> {self.active_priority} from enabled priorities: {sorted(enabled_priorities)}"
+            )
+            return True
+        
+        return False
+    
+    def _get_previous_priority(
+        self, consumers: list[Mapping[str, Any]], current_priority: float | None
+    ) -> float | None:
+        """Get the previous lower priority number from consumers list.
+        
+        Returns None if current_priority is None or no lower priority exists.
+        """
+        if current_priority is None:
+            return None
+        
+        # Find previous lower priority number (only check enabled, not available)
+        # active_priority can be set to an enabled consumer even if it's currently unavailable
+        prev_priority = None
+        enabled_priorities_list = self._collect_enabled_priorities(consumers, use_cache=True)
+        for priority in enabled_priorities_list:
+            if priority < current_priority:
+                if prev_priority is None or priority > prev_priority:
+                    prev_priority = priority
+        
+        return prev_priority
+
+    async def _async_update_divider(
+        self, consumers: list[Mapping[str, Any]], delta_w: float | None, pid_pct: float | None, dt: float
+    ) -> None:
+        """Update divider logic: validate priority, update consumers, process step changes.
+        
+        This method encapsulates all divider-related update logic to keep _async_update_data cleaner.
+        """
+        # Validate and initialize active_priority: must be from an enabled consumer
+        enabled_priorities = self._collect_enabled_priorities(consumers, use_cache=True)
+        
+        if enabled_priorities:
+            self._validate_and_fix_active_priority(enabled_priorities)
+        else:
+            # No enabled consumers - this should not happen, but handle gracefully
+            _LOGGER.warning("Divider enabled but no enabled consumers found")
+        
+        # Assign active/inactive status to all consumers
+        await self._assign_active_status_to_consumers(consumers)
+        
+        # Update consumers (they may send step change requests)
+        await self._async_update_controlled_consumers(consumers, delta_w, pid_pct, dt)
+        await self._async_update_binary_consumers(consumers, delta_w, dt)
+        
+        # Process step change requests from active consumers
+        await self._process_step_change_requests(consumers)
+        
+        # Validate active_priority again after step changes to ensure it's still valid
+        # Note: Consumers may have changed enabled state, so we re-collect (but still use cache if unchanged)
+        enabled_priorities_after = self._collect_enabled_priorities(consumers, use_cache=True)
+        
+        if enabled_priorities_after:
+            changed = self._validate_and_fix_active_priority(enabled_priorities_after)
+            if changed:
+                _LOGGER.warning(
+                    f"Fixed active_priority after step changes to {self.active_priority} "
+                    f"from enabled priorities: {sorted(enabled_priorities_after)}"
+                )
+        else:
+            # No enabled consumers - this should not happen when divider is enabled
+            _LOGGER.warning(
+                f"Divider enabled but no enabled consumers found after step changes. "
+                f"active_priority={self.active_priority} will remain as-is."
+            )
+        
+        # Re-assign active status after step changes
+        await self._assign_active_status_to_consumers(consumers)
+
+    async def _assign_active_status_to_consumers(
+        self, consumers: list[Mapping[str, Any]]
+    ) -> None:
+        """Assign active/inactive status to all consumers based on current active_priority.
+        
+        Divider sends signals to each consumer indicating if they are active.
+        """
+        active_priority = self.active_priority
+        
+        for consumer in consumers:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            priority = self.consumer_manager.get_priority(consumer)
+            
+            # Set active status based on priority match (use tolerance for float comparison)
+            is_active = False
+            if active_priority is not None and active_priority > 0:
+                if abs(priority - active_priority) < 0.01:
+                    is_active = True
+            
+            # Log state transition if changed
+            was_active = bool(runtime.get(RUNTIME_FIELD_IS_ACTIVE, False))
+            if was_active != is_active:
+                _LOGGER.debug(
+                    f"Consumer {consumer_id} (priority {priority}): "
+                    f"Active status changed {was_active} -> {is_active} "
+                    f"(active_priority={active_priority})"
+                )
+            
+            runtime[RUNTIME_FIELD_IS_ACTIVE] = is_active
+            
+            # Clear step change request (will be set by consumer if needed)
+            runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = None
+
+    async def _process_step_change_requests(
+        self, consumers: list[Mapping[str, Any]]
+    ) -> None:
+        """Process step change requests from active consumers.
+        
+        Only processes requests from consumers that are currently active.
+        """
+        active_priority = self.active_priority
+        
+        for consumer in consumers:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            priority = _coerce_float(consumer.get(CONSUMER_PRIORITY), 999.0)
+            is_active = bool(runtime.get(RUNTIME_FIELD_IS_ACTIVE, False))
+            step_request = runtime.get(RUNTIME_FIELD_STEP_CHANGE_REQUEST)
+            
+            # Only process requests from active consumer
+            if not is_active or step_request is None:
+                continue
+            
+            # Verify this consumer is actually the active priority (use tolerance for float comparison)
+            if active_priority is None or active_priority <= 0 or abs(priority - active_priority) >= 0.01:
+                runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = None
+                continue
+            
+            # Process step change request
+            if step_request == "next":
+                next_priority = self._get_next_priority(consumers, active_priority)
+                if next_priority is not None and next_priority > 0:
+                    old_priority = self.active_priority
+                    self.active_priority = next_priority
+                    _LOGGER.info(
+                        f"Step change: {old_priority} -> {next_priority} (next step from {consumer_id})"
+                    )
+                else:
+                    # No next priority found - should not happen if there are more enabled consumers
+                    # Keep current active_priority, don't change it
+                    _LOGGER.warning(
+                        f"Next step requested from {consumer_id} but no next enabled priority found (current: {active_priority}). "
+                        f"Keeping active_priority at {self.active_priority}"
+                    )
+                runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = None
+            elif step_request == "previous":
+                prev_priority = self._get_previous_priority(consumers, active_priority)
+                if prev_priority is not None:
+                    self.active_priority = prev_priority
+                    _LOGGER.debug(
+                        f"Step change: {active_priority} -> {prev_priority} (previous step from {consumer_id})"
+                    )
+                runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = None
+
+    async def _async_update_controlled_consumers(
+        self, consumers: list[Mapping[str, Any]], delta_w: float | None, pid_pct: float | None, dt: float
+    ) -> None:
+        """Update controlled consumers using new divider logic.
+        
+        Consumers receive active/inactive status from divider.
+        Only active consumers can ramp and send step change signals.
+        """
+        import time
+        start_time = time.monotonic()
+        
+        if pid_pct is None or delta_w is None:
+            return
+
+        def _is_at_max(cmd: float, maximum: float) -> bool:
+            return cmd >= maximum or math.isclose(cmd, maximum, abs_tol=0.5)
+
+        # Update active consumer tracking for observability
+        # Track the active consumer (controlled or binary) based on active_priority
+        self.active_controlled_consumer_id = None
+        self.active_controlled_consumer_name = None
+        self.active_controlled_consumer_priority = None
+        if self.active_priority is not None and self.active_priority > 0:
+            for consumer in consumers:
+                consumer_id = consumer.get(CONSUMER_ID)
+                if consumer_id is None:
+                    continue
+                priority = self.consumer_manager.get_priority(consumer)
+                # Use tolerance for float comparison
+                if abs(priority - self.active_priority) < 0.01:
+                    self.active_controlled_consumer_id = consumer_id
+                    self.active_controlled_consumer_name = consumer.get(CONSUMER_NAME, consumer_id)
+                    self.active_controlled_consumer_priority = priority
+                    break
+
+        for consumer in consumers:
+            if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_CONTROLLED:
+                continue
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            is_active = bool(runtime.get(RUNTIME_FIELD_IS_ACTIVE, False))
+            cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W, 0.0))
+            start_timer = float(runtime.get(RUNTIME_FIELD_START_TIMER_S, 0.0))
+            stop_timer = float(runtime.get(RUNTIME_FIELD_STOP_TIMER_S, 0.0))
+            min_power = float(consumer.get(CONSUMER_MIN_POWER_W, 0.0))
+            max_power = float(consumer.get(CONSUMER_MAX_POWER_W, 0.0))
+            start_delay = self._get_consumer_delay_seconds(consumer_id, True)
+            stop_delay = self._get_consumer_delay_seconds(consumer_id, False)
+            step_w = self._get_consumer_step_w(consumer_id, consumer)
+            pid_deadband_pct = self._get_consumer_pid_deadband_pct(consumer_id, consumer)
+            enabled = self._consumer_enabled(consumer)
+            available = self._consumer_available(consumer)
+            
+            prev_cmd = cmd_w
+            step = 0.0
+            reason: str | None = None
+            
+            # Check disabled/unavailable first
+            if not enabled or not available:
+                was_running = cmd_w > 0.0
+                cmd_w = 0.0
+                start_timer = 0.0
+                stop_timer = 0.0
+                reason = "Unavailable" if not available else "Disabled"
+                if was_running:
+                    await self._async_command_consumer_enabled(consumer, False)
+            elif not is_active:
+                # Inactive consumer: hold current state, no ramping, no timers
+                start_timer = 0.0
+                stop_timer = 0.0
+                if cmd_w <= 0.0:
+                    reason = f"Waiting for turn (inactive, delta={round(delta_w)}W)"
+                else:
+                    reason = f"Holding at {round(cmd_w)}W (inactive)"
+            elif cmd_w <= 0.0:
+                # Consumer is OFF and ACTIVE, check start timer
+                stop_timer = 0.0
+                if delta_w >= min_power:
+                    # Condition met: count timer
+                    start_timer += dt
+                    remaining = self._format_timer_remaining(start_delay, start_timer)
+                    reason = f"Starting in {round(remaining)}s (delta={round(delta_w)}W)"
+                else:
+                    # Condition not met: reset timer
+                    start_timer = 0.0
+                    reason = f"Waiting for surplus >= {round(min_power)}W (delta={round(delta_w)}W)"
+                
+                if start_timer >= start_delay and start_delay >= 0.0:
+                    cmd_w = min_power
+                    start_timer = 0.0
+                    stop_timer = 0.0
+                    reason = f"Starting at {round(cmd_w)}W"
+                    await self._async_command_consumer_enabled(consumer, True)
+            else:
+                # Consumer is running (cmd_w > 0)
+                start_timer = 0.0
+                
+                # Only active consumer can ramp
+                step = self._compute_controlled_consumer_step(pid_pct, pid_deadband_pct, step_w)
+                prev_cmd_w = cmd_w
+                cmd_w = max(min_power, min(max_power, cmd_w + step))
+                
+                # Check if at max power (send "next step" signal)
+                if _is_at_max(cmd_w, max_power):
+                    # At max, send "next step" signal to divider
+                    runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = "next"
+                    reason = f"Running at {round(cmd_w)}W (max reached, requesting next step)"
+                    stop_timer = 0.0  # Reset stop timer when at max
+                else:
+                    # Not at max, check stop timer conditions
+                    # Stop timer starts only when: at min power AND delta_w < 0 AND active
+                    at_min = math.isclose(cmd_w, min_power, abs_tol=0.5) or cmd_w <= min_power
+                    if at_min and delta_w < 0.0:
+                        # All conditions met: count timer
+                        stop_timer += dt
+                        remaining = self._format_timer_remaining(stop_delay, stop_timer)
+                        reason = f"Stopping in {round(remaining)}s (delta={round(delta_w)}W)"
+                    else:
+                        # Conditions not met: reset timer
+                        stop_timer = 0.0
+                        if not at_min:
+                            reason = f"Running at {round(cmd_w)}W"
+                        else:
+                            reason = f"Running at {round(cmd_w)}W (waiting for delta_w < 0)"
+                    
+                    if stop_timer >= stop_delay and stop_delay >= 0.0:
+                        # Stop timer expired, shutdown consumer and send "previous step" signal
+                        cmd_w = 0.0
+                        stop_timer = 0.0
+                        start_timer = 0.0
+                        reason = "Stopped after stop delay (requesting previous step)"
+                        runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = "previous"
+                        await self._async_command_consumer_enabled(consumer, False)
+
+            runtime[RUNTIME_FIELD_CMD_W] = cmd_w
+            runtime[RUNTIME_FIELD_START_TIMER_S] = start_timer
+            runtime[RUNTIME_FIELD_STOP_TIMER_S] = stop_timer
+            self._set_consumer_reason(consumer_id, reason)
+            async_dispatch_consumer_runtime_update(self.hass, self.entry.entry_id, consumer_id)
+
+            if not math.isclose(prev_cmd, cmd_w, abs_tol=1e-6):
+                await self._async_command_consumer_power(consumer, cmd_w)
+
+    async def _async_update_binary_consumers(
+        self, consumers: list[Mapping[str, Any]], delta_w: float | None, dt: float
+    ) -> None:
+        """Update binary consumers using new divider logic.
+        
+        Consumers receive active/inactive status from divider.
+        Only active consumers can change state and send step change signals.
+        """
+        import time
+        start_time = time.monotonic()
+        
+        if delta_w is None:
+            return
+        
+        for consumer in consumers:
+            if consumer.get(CONSUMER_TYPE) != CONSUMER_TYPE_BINARY:
+                continue
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            is_active = bool(runtime.get(RUNTIME_FIELD_IS_ACTIVE, False))
+            enabled = self._consumer_enabled(consumer)
+            available = self._consumer_available(consumer)
+            
+            # Check disabled/unavailable first
+            if not enabled or not available:
+                is_on = False
+                start_timer = 0.0
+                stop_timer = 0.0
+                reason = "Unavailable" if not available else "Disabled"
+                runtime[RUNTIME_FIELD_IS_ON] = False
+                runtime[RUNTIME_FIELD_START_TIMER_S] = 0.0
+                runtime[RUNTIME_FIELD_STOP_TIMER_S] = 0.0
+                self._set_consumer_reason(consumer_id, reason)
+                async_dispatch_consumer_runtime_update(self.hass, self.entry.entry_id, consumer_id)
+                await self._async_command_consumer_enabled(consumer, False)
+                continue
+            
+            is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+            start_timer = float(runtime.get(RUNTIME_FIELD_START_TIMER_S, 0.0))
+            stop_timer = float(runtime.get(RUNTIME_FIELD_STOP_TIMER_S, 0.0))
+            threshold_w = self._get_consumer_threshold_w(consumer_id, consumer)
+            start_delay = self._get_consumer_delay_seconds(consumer_id, True)
+            stop_delay = self._get_consumer_delay_seconds(consumer_id, False)
+            
+            reason: str | None = None
+            
+            if not is_active:
+                # Inactive consumer: maintain current state, no timers
+                start_timer = 0.0
+                stop_timer = 0.0
+                reason = "ON (inactive)" if is_on else "OFF (inactive)"
+            elif not is_on:
+                # Consumer is OFF, check start timer
+                stop_timer = 0.0
+                if delta_w >= threshold_w:
+                    # Condition met: count timer
+                    start_timer += dt
+                    remaining = self._format_timer_remaining(start_delay, start_timer)
+                    reason = f"Starting in {round(remaining)}s (delta={round(delta_w)}W)"
+                else:
+                    # Condition not met: reset timer
+                    start_timer = 0.0
+                    reason = f"Waiting for surplus >= {round(threshold_w)}W (delta={round(delta_w)}W)"
+                
+                if start_timer >= start_delay and start_delay >= 0.0:
+                    # Start timer expired, turn ON and send "next step" signal
+                    is_on = True
+                    start_timer = 0.0
+                    stop_timer = 0.0
+                    reason = "Starting (requesting next step)"
+                    runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = "next"
+                    await self._async_command_consumer_enabled(consumer, True)
+            else:
+                # Consumer is ON, check stop timer
+                start_timer = 0.0
+                
+                if delta_w < 0.0:
+                    # Condition met: count timer
+                    stop_timer += dt
+                    remaining = self._format_timer_remaining(stop_delay, stop_timer)
+                    reason = f"Stopping in {round(remaining)}s (delta={round(delta_w)}W)"
+                else:
+                    # Condition not met: reset timer
+                    stop_timer = 0.0
+                    reason = "Running"
+                
+                if stop_timer >= stop_delay and stop_delay >= 0.0:
+                    # Stop timer expired, turn OFF and send "previous step" signal
+                    is_on = False
+                    stop_timer = 0.0
+                    start_timer = 0.0
+                    reason = "Stopped after stop delay (requesting previous step)"
+                    runtime[RUNTIME_FIELD_STEP_CHANGE_REQUEST] = "previous"
+                    await self._async_command_consumer_enabled(consumer, False)
+
+            runtime[RUNTIME_FIELD_IS_ON] = is_on
+            runtime[RUNTIME_FIELD_START_TIMER_S] = start_timer
+            runtime[RUNTIME_FIELD_STOP_TIMER_S] = stop_timer
+            self._set_consumer_reason(consumer_id, reason)
+            async_dispatch_consumer_runtime_update(self.hass, self.entry.entry_id, consumer_id)
+        
+        # Log performance metrics
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+        binary_count = sum(1 for c in consumers if c.get(CONSUMER_TYPE) == CONSUMER_TYPE_BINARY)
+        if binary_count > 0:
+            self.consumer_manager.log_performance_metrics(
+                [c for c in consumers if c.get(CONSUMER_TYPE) == CONSUMER_TYPE_BINARY],
+                "update_binary_consumers",
+                elapsed_ms
+            )
+
+    async def _async_disable_divider_consumers(self, consumers: list[Mapping[str, Any]]) -> None:
+        for consumer in consumers:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            consumer_type = consumer.get(CONSUMER_TYPE)
+            reason = "Divider disabled"
+            runtime[RUNTIME_FIELD_START_TIMER_S] = 0.0
+            runtime[RUNTIME_FIELD_STOP_TIMER_S] = 0.0
+            runtime[RUNTIME_FIELD_REASON] = reason
+            if consumer_type == CONSUMER_TYPE_CONTROLLED:
+                previous_cmd = runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
+                runtime[RUNTIME_FIELD_CMD_W] = 0.0
+                async_dispatch_consumer_runtime_update(self.hass, self.entry.entry_id, consumer_id)
+                if not math.isclose(previous_cmd, 0.0, abs_tol=1e-6):
+                    await self._async_command_consumer_power(consumer, 0.0)
+                    # Send command to physical device to turn off
+                    await self._async_command_consumer_enabled(consumer, False)
+            elif consumer_type == CONSUMER_TYPE_BINARY:
+                was_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+                runtime[RUNTIME_FIELD_IS_ON] = False
+                async_dispatch_consumer_runtime_update(self.hass, self.entry.entry_id, consumer_id)
+                if was_on:
+                    await self._async_command_consumer_enabled(consumer, False)
+            else:
+                async_dispatch_consumer_runtime_update(self.hass, self.entry.entry_id, consumer_id)
+
+    def _update_divider_observability(self, consumers: list[Mapping[str, Any]]) -> None:
+        if not self._divider_enabled:
+            self.divider_state = DIVIDER_STATE_DISABLED
+            self.divider_reason = "Divider disabled"
+            return
+
+        running = False
+        waiting_start = False
+        waiting_stop = False
+        reason = None
+
+        for consumer in consumers:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                continue
+            runtime = get_consumer_runtime(self.hass, self.entry.entry_id, consumer_id)
+            name = consumer.get(CONSUMER_NAME, consumer_id)
+            consumer_type = consumer.get(CONSUMER_TYPE)
+            start_timer = float(runtime.get(RUNTIME_FIELD_START_TIMER_S, 0.0))
+            stop_timer = float(runtime.get(RUNTIME_FIELD_STOP_TIMER_S, 0.0))
+            if consumer_type == CONSUMER_TYPE_CONTROLLED:
+                cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W, 0.0))
+                if cmd_w > 0.0:
+                    running = True
+                if start_timer > 0.0 and cmd_w <= 0.0:
+                    waiting_start = True
+                    remaining = self._format_timer_remaining(
+                        self._get_consumer_delay_seconds(consumer_id, True), start_timer
+                    )
+                    reason = reason or f"Starting {name} in {round(remaining)}s"
+                if stop_timer > 0.0 and cmd_w > 0.0:
+                    waiting_stop = True
+                    remaining = self._format_timer_remaining(
+                        self._get_consumer_delay_seconds(consumer_id, False), stop_timer
+                    )
+                    reason = reason or f"Stopping {name} in {round(remaining)}s"
+            elif consumer_type == CONSUMER_TYPE_BINARY:
+                is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+                if is_on:
+                    running = True
+                if start_timer > 0.0 and not is_on:
+                    waiting_start = True
+                    remaining = self._format_timer_remaining(
+                        self._get_consumer_delay_seconds(consumer_id, True), start_timer
+                    )
+                    reason = reason or f"Starting {name} in {round(remaining)}s"
+                if stop_timer > 0.0 and is_on:
+                    waiting_stop = True
+                    remaining = self._format_timer_remaining(
+                        self._get_consumer_delay_seconds(consumer_id, False), stop_timer
+                    )
+                    reason = reason or f"Stopping {name} in {round(remaining)}s"
+
+        if waiting_stop:
+            self.divider_state = DIVIDER_STATE_WAITING_STOP_TIMER
+        elif waiting_start:
+            self.divider_state = DIVIDER_STATE_WAITING_START_TIMER
+        elif running:
+            self.divider_state = DIVIDER_STATE_ACTIVE
+        else:
+            self.divider_state = DIVIDER_STATE_IDLE
+
+        if self.divider_state == DIVIDER_STATE_ACTIVE:
+            if self.active_controlled_consumer_name:
+                reason = f"Running {self.active_controlled_consumer_name}"
+            else:
+                reason = reason or "Running"
+        elif self.divider_state == DIVIDER_STATE_IDLE:
+            reason = "Idle"
+
+        self.divider_reason = reason
 
     def _build_runtime_options(self) -> RuntimeOptions:
         enabled = self.entry.options.get(CONF_ENABLED, DEFAULT_ENABLED)
@@ -800,6 +1757,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 return True
         return False
 
+    def _invalidate_consumer_cache(self) -> None:
+        """Invalidate cached consumer data when consumers change."""
+        self.consumer_manager.invalidate_cache()
+    
     def apply_options(self, options: Mapping[str, Any]) -> None:
         """Apply runtime tuning without resetting PID state."""
 
@@ -810,7 +1771,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._runtime_mode = options[CONF_RUNTIME_MODE]
         if CONF_MANUAL_OUT_VALUE in options:
             self._manual_out_value = _coerce_float(options.get(CONF_MANUAL_OUT_VALUE), self._manual_out_value)
+        self._divider_enabled = options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
         self.pid.apply_options(self._build_pid_config_from_options(options))
+        # Invalidate cache when options change (consumers may have changed)
+        self._invalidate_consumer_cache()
 
     def _calculate_output_plan(
         self,
@@ -841,8 +1805,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         error_raw: float | None = None
         if pv_for_pid_raw is not None and sp_for_pid_raw is not None:
             error_raw = sp_for_pid_raw - pv_for_pid_raw
-            if options.pid_mode == PID_MODE_REVERSE:
-                error_raw = -error_raw
+            # When grid limiter is active, always use DIRECT mode behavior (same logic as error_pct)
+            if limiter_result.limiter_state == GRID_LIMITER_STATE_NORMAL:
+                if options.pid_mode == PID_MODE_REVERSE:
+                    error_raw = -error_raw
 
         if not options.enabled:
             self.pid.reset()
@@ -933,8 +1899,12 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             )
 
         error_pct = sp_for_pid - pv_for_pid
-        if options.pid_mode == PID_MODE_REVERSE:
-            error_pct = -error_pct
+        # When grid limiter is active, always use DIRECT mode behavior (don't apply PID mode inversion)
+        # because the control objective is already set up correctly by the limiter
+        # Normal mode: Apply PID mode setting (DIRECT/REVERSE)
+        if limiter_result.limiter_state == GRID_LIMITER_STATE_NORMAL:
+            if options.pid_mode == PID_MODE_REVERSE:
+                error_pct = -error_pct
 
         if (
             limiter_result.limiter_state == GRID_LIMITER_STATE_NORMAL
@@ -961,6 +1931,10 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             current_output_pct = self._last_output_pct
 
         if bumpless_needed and current_output_pct is not None:
+            # When limiter state changes, PV is normalized to a different range, so reset _prev_pv
+            # to avoid incorrect derivative term calculation in bumpless_transfer
+            if limiter_result.limiter_state != prev_limiter_state:
+                self.pid.reset_prev_pv()
             self.pid.bumpless_transfer(current_output=current_output_pct, error=error_pct, pv=pv_for_pid)
 
         self._limiter_state = limiter_result.limiter_state
@@ -1008,11 +1982,18 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         prev_pv_for_pid = self._last_pv_pct
         prev_runtime_mode = self._previous_runtime_mode
         prev_manual_sp_value = self._manual_sp_value
+        dt = self._compute_dt()
+        consumers = self.entry.options.get(CONF_CONSUMERS, [])
+        if not isinstance(consumers, list):
+            consumers = []
+        self._divider_enabled = self.entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
 
         options = self._build_runtime_options()
         inputs = self._read_inputs(options)
+        self.delta_w = None if inputs.pv is None or inputs.sp is None else inputs.pv - inputs.sp
         setpoint_context = self._compute_setpoint_context(options, inputs, prev_runtime_mode, prev_manual_sp_value)
         limiter_result = self._apply_grid_limiter(options, inputs, setpoint_context, prev_limiter_state)
+        delta_w = self.delta_w
 
         out_ent = _get_entity_id(self.entry, CONF_OUTPUT_ENTITY)
         out_domain = _get_domain(out_ent)
@@ -1026,12 +2007,25 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 self._invalid_output_reported = True
             self._previous_runtime_mode = setpoint_context.runtime_mode
             self._log_runtime_mode_change(prev_runtime_mode, setpoint_context.runtime_mode, prev_manual_sp_value, setpoint_context.manual_sp_display_value)
+            if self._divider_enabled:
+                await self._async_update_divider(consumers, delta_w, self.pid_output_pct, dt)
+            else:
+                await self._async_disable_divider_consumers(consumers)
+                self.active_controlled_consumer_id = None
+                self.active_controlled_consumer_name = None
+                self.active_controlled_consumer_priority = None
+                self.active_priority = None
+            self.pid_output_pct = self._last_output_pct
+            self._update_divider_observability(consumers)
+            self._previous_divider_enabled = self._divider_enabled
             return FlowState(
                 pv=limiter_result.pv_for_pid,
                 sp=limiter_result.sp_for_pid,
                 grid_power=inputs.grid_power,
                 out=None,
                 output_pre_rate_limit=None,
+                pid_pct=self._last_output_pct,
+                delta_w=delta_w,
                 error=None,
                 enabled=options.enabled,
                 status="invalid_output",
@@ -1043,6 +2037,11 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 p_term=None,
                 i_term=None,
                 d_term=None,
+                active_controlled_consumer_id=self.active_controlled_consumer_id,
+                active_controlled_consumer_name=self.active_controlled_consumer_name,
+                active_controlled_consumer_priority=self.active_controlled_consumer_priority,
+                divider_state=self.divider_state,
+                divider_reason=self.divider_reason,
             )
 
         output_plan = self._calculate_output_plan(
@@ -1058,6 +2057,20 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
 
         write_result = await self._maybe_write_output(out_ent, output_plan.output, options)
         final_status = self._apply_output_status(output_plan.status, write_result.write_failed)
+        self.pid_output_pct = self._last_output_pct
+        pid_pct = self.pid_output_pct
+
+        if self._divider_enabled:
+            await self._async_update_divider(consumers, delta_w, pid_pct, dt)
+        else:
+            await self._async_disable_divider_consumers(consumers)
+            self.active_controlled_consumer_id = None
+            self.active_controlled_consumer_name = None
+            self.active_controlled_consumer_priority = None
+            self.active_priority = None
+
+        self._update_divider_observability(consumers)
+        self._previous_divider_enabled = self._divider_enabled
 
         return FlowState(
             pv=limiter_result.pv_for_pid,
@@ -1065,6 +2078,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             grid_power=inputs.grid_power,
             out=self._last_output_raw,
             output_pre_rate_limit=output_plan.output_pre_rate_limit,
+            pid_pct=pid_pct,
+            delta_w=delta_w,
             error=output_plan.error,
             enabled=options.enabled,
             status=final_status,
@@ -1076,10 +2091,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             p_term=output_plan.p_term,
             i_term=output_plan.i_term,
             d_term=output_plan.d_term,
+            active_controlled_consumer_id=self.active_controlled_consumer_id,
+            active_controlled_consumer_name=self.active_controlled_consumer_name,
+            active_controlled_consumer_priority=self.active_controlled_consumer_priority,
+            divider_state=self.divider_state,
+            divider_reason=self.divider_reason,
         )
-
-# Manual test checklist:
-# 1) change limiter limit while running -> output continues smoothly (no jump to 0)
-# 2) change deadband -> no reset
-# 3) change kp/ki -> no reset
-# 4) start a big load to trigger limiter -> smooth transition; stop load -> smooth return.

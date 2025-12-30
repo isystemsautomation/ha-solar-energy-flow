@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -39,6 +41,8 @@ from .helpers import (
     get_entry_coordinator,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
@@ -62,6 +66,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         EnergyDividerActiveConsumerSensor(coordinator, entry),
         EnergyDividerActivePrioritySensor(coordinator, entry),
         EnergyDividerConsumersSummarySensor(coordinator, entry, consumers),
+        EnergyDividerTotalPowerSensor(coordinator, entry, consumers),
+        EnergyDividerPriorityListSensor(coordinator, entry, consumers),
         EnergyDividerStateSensor(coordinator, entry),
         EnergyDividerReasonSensor(coordinator, entry),
     ]
@@ -144,6 +150,40 @@ class _BaseDividerSensor(CoordinatorEntity, SensorEntity):
             manufacturer="Solar Energy Flow",
             model="Energy Divider",
         )
+
+
+class _BaseDividerRuntimeSensor(_BaseDividerSensor):
+    def __init__(
+        self,
+        coordinator: SolarEnergyFlowCoordinator,
+        entry: ConfigEntry,
+        name: str,
+        unique_suffix: str,
+        consumers: list[dict],
+        entity_category: EntityCategory | None = None,
+    ) -> None:
+        super().__init__(coordinator, entry, name, unique_suffix, entity_category)
+        self._consumer_ids: set[str] = set()
+        for consumer in consumers:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id:
+                self._consumer_ids.add(consumer_id)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                consumer_runtime_updated_signal(self._entry.entry_id),
+                self._handle_runtime_update,
+            )
+        )
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_runtime_update(self, consumer_id: str) -> None:
+        if not self._consumer_ids or consumer_id in self._consumer_ids:
+            self.async_write_ha_state()
 
 
 class SolarEnergyFlowEffectiveSPSensor(_BaseFlowSensor):
@@ -290,8 +330,14 @@ class EnergyDividerPIDOutputPctSensor(_BaseDividerSensor):
 
     @property
     def native_value(self):
-        value = getattr(self.coordinator, "pid_output_pct", None)
-        return round(value, 1) if value is not None else None
+        try:
+            value = getattr(self.coordinator, "pid_output_pct", None)
+            if value is None:
+                return None
+            return round(float(value), 1)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to read PID output for %s: %s", self._entry.entry_id, err)
+            return None
 
 
 class EnergyDividerDeltaWSensor(_BaseDividerSensor):
@@ -302,7 +348,12 @@ class EnergyDividerDeltaWSensor(_BaseDividerSensor):
 
     @property
     def native_value(self):
-        return getattr(self.coordinator, "delta_w", None)
+        try:
+            value = getattr(self.coordinator, "delta_w", None)
+            return float(value) if value is not None else None
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to read delta W for %s: %s", self._entry.entry_id, err)
+            return None
 
 
 class EnergyDividerActiveConsumerSensor(_BaseDividerSensor):
@@ -317,8 +368,14 @@ class EnergyDividerActiveConsumerSensor(_BaseDividerSensor):
 
     @property
     def native_value(self) -> str | None:
-        name = getattr(self.coordinator, "active_controlled_consumer_name", None)
-        return name if name is not None else "None"
+        try:
+            name = getattr(self.coordinator, "active_controlled_consumer_name", None)
+            if not name:
+                return "None"
+            return str(name)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to read active controlled consumer for %s: %s", self._entry.entry_id, err)
+            return "None"
 
 
 class EnergyDividerActivePrioritySensor(_BaseDividerSensor):
@@ -335,7 +392,16 @@ class EnergyDividerActivePrioritySensor(_BaseDividerSensor):
 
     @property
     def native_value(self):
-        return getattr(self.coordinator, "active_controlled_consumer_priority", None)
+        try:
+            priority = getattr(self.coordinator, "active_controlled_consumer_priority", None)
+            if priority is None:
+                return "-"
+            if isinstance(priority, (int, float)):
+                return priority
+            return str(priority)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to read active consumer priority for %s: %s", self._entry.entry_id, err)
+            return "-"
 
 
 class EnergyDividerStateSensor(_BaseDividerSensor):
@@ -346,7 +412,14 @@ class EnergyDividerStateSensor(_BaseDividerSensor):
 
     @property
     def native_value(self):
-        return getattr(self.coordinator, "divider_state", None)
+        try:
+            state = getattr(self.coordinator, "divider_state", None)
+            if state is None:
+                return "n/a"
+            return str(state)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to read divider state for %s: %s", self._entry.entry_id, err)
+            return "n/a"
 
 
 class EnergyDividerReasonSensor(_BaseDividerSensor):
@@ -357,29 +430,22 @@ class EnergyDividerReasonSensor(_BaseDividerSensor):
 
     @property
     def native_value(self):
-        return getattr(self.coordinator, "divider_reason", None)
+        try:
+            reason = getattr(self.coordinator, "divider_reason", None)
+            if reason is None:
+                return "n/a"
+            return str(reason)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to read divider reason for %s: %s", self._entry.entry_id, err)
+            return "n/a"
 
 
-class EnergyDividerConsumersSummarySensor(_BaseDividerSensor):
+class EnergyDividerConsumersSummarySensor(_BaseDividerRuntimeSensor):
     def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry, consumers: list[dict]) -> None:
-        super().__init__(coordinator, entry, "Consumers summary", "divider_consumers_summary", EntityCategory.DIAGNOSTIC)
-        self._consumers = consumers
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass,
-                consumer_runtime_updated_signal(self._entry.entry_id),
-                self._handle_runtime_update,
-            )
+        super().__init__(
+            coordinator, entry, "Consumers summary", "divider_consumers_summary", consumers, EntityCategory.DIAGNOSTIC
         )
-        self.async_write_ha_state()
-
-    @callback
-    def _handle_runtime_update(self, consumer_id: str) -> None:
-        if any(consumer.get(CONSUMER_ID) == consumer_id for consumer in self._consumers):
-            self.async_write_ha_state()
+        self._consumers = consumers
 
     def _truncate(self, value: str) -> str:
         if len(value) <= 255:
@@ -387,41 +453,175 @@ class EnergyDividerConsumersSummarySensor(_BaseDividerSensor):
         return value[:252] + "..."
 
     def _format_consumer(self, consumer: dict) -> str | None:
-        consumer_id = consumer.get(CONSUMER_ID)
-        if consumer_id is None:
-            return None
-        name = consumer.get(CONSUMER_NAME, consumer_id)
-        runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
-        cmd_w = runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
-        consumer_type = consumer.get(CONSUMER_TYPE)
-        display_value: str
-        if consumer_type == CONSUMER_TYPE_CONTROLLED:
-            display_value = f"{round(cmd_w)}W"
-        elif consumer_type == CONSUMER_TYPE_BINARY:
-            is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
-            display_value = "RUNNING" if is_on else "OFF"
-        else:
-            binding = get_consumer_binding(self.hass, self._entry.entry_id, consumer)
-            enabled_state = binding.get_effective_enabled(self.hass) if binding is not None else None
-            if enabled_state is True:
-                display_value = "ON"
-            elif enabled_state is False:
-                display_value = "OFF"
+        try:
+            consumer_id = consumer.get(CONSUMER_ID)
+            if consumer_id is None:
+                return None
+            name = consumer.get(CONSUMER_NAME, consumer_id)
+            runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
+            cmd_w = runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
+            consumer_type = consumer.get(CONSUMER_TYPE)
+            display_value: str
+            if consumer_type == CONSUMER_TYPE_CONTROLLED:
+                display_value = f"{round(float(cmd_w or 0.0))}W"
+            elif consumer_type == CONSUMER_TYPE_BINARY:
+                is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+                display_value = "RUNNING" if is_on else "OFF"
             else:
-                display_value = "UNKNOWN"
-        return f"{name}={display_value}"
+                binding = get_consumer_binding(self.hass, self._entry.entry_id, consumer)
+                enabled_state = binding.get_effective_enabled(self.hass) if binding is not None else None
+                if enabled_state is True:
+                    display_value = "ON"
+                elif enabled_state is False:
+                    display_value = "OFF"
+                else:
+                    display_value = "UNKNOWN"
+            return f"{name}={display_value}"
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to format consumer summary for %s: %s", self._entry.entry_id, err)
+            return None
 
     @property
-    def native_value(self) -> str | None:
-        if not self._consumers:
-            return None
-        entries: list[str] = []
+    def native_value(self) -> str:
+        try:
+            if not self._consumers:
+                return "empty"
+            entries: list[str] = []
+            for consumer in self._consumers:
+                formatted = self._format_consumer(consumer)
+                if formatted:
+                    entries.append(formatted)
+            summary = "; ".join(entries)
+            if not summary:
+                return "empty"
+            return self._truncate(summary)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to build consumers summary for %s: %s", self._entry.entry_id, err)
+            return "error"
+
+
+class EnergyDividerTotalPowerSensor(_BaseDividerRuntimeSensor):
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry, consumers: list[dict]) -> None:
+        super().__init__(
+            coordinator, entry, "Total consumer power", "divider_total_power", consumers, EntityCategory.DIAGNOSTIC
+        )
+        self._consumers = consumers
+
+    def _safe_float(self, value: float | int | None) -> float:
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _compute_total_power(self) -> float:
+        total = 0.0
         for consumer in self._consumers:
-            formatted = self._format_consumer(consumer)
-            if formatted:
-                entries.append(formatted)
-        summary = "; ".join(entries)
-        return self._truncate(summary) if summary else None
+            consumer_id = consumer.get(CONSUMER_ID)
+            if not consumer_id:
+                continue
+            try:
+                consumer_type = consumer.get(CONSUMER_TYPE)
+                runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
+                if consumer_type == CONSUMER_TYPE_CONTROLLED:
+                    total += self._safe_float(runtime.get(RUNTIME_FIELD_CMD_W))
+                else:
+                    total += 0.0
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.exception(
+                    "Failed to compute total power for consumer %s on %s: %s", consumer_id, self._entry.entry_id, err
+                )
+        return total
+
+    @property
+    def native_value(self) -> float:
+        try:
+            return self._compute_total_power()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to compute divider total power for %s: %s", self._entry.entry_id, err)
+            return 0.0
+
+
+class EnergyDividerPriorityListSensor(_BaseDividerRuntimeSensor):
+    def __init__(self, coordinator: SolarEnergyFlowCoordinator, entry: ConfigEntry, consumers: list[dict]) -> None:
+        super().__init__(
+            coordinator, entry, "Priority list", "divider_priority_list", consumers, EntityCategory.DIAGNOSTIC
+        )
+        self._consumers = consumers
+
+    @staticmethod
+    def _truncate(value: str) -> str:
+        if len(value) <= 255:
+            return value
+        return value[:254] + "…"
+
+    @staticmethod
+    def _format_priority(raw_priority: float | int | str | None, fallback: int) -> str:
+        try:
+            if raw_priority is None:
+                return str(fallback)
+            value = float(raw_priority)
+            if value.is_integer():
+                return str(int(value))
+            return str(round(value, 2))
+        except (TypeError, ValueError):
+            return str(fallback)
+
+    def _format_consumer_state(self, consumer: dict, fallback_priority: int) -> str | None:
+        consumer_id = consumer.get(CONSUMER_ID)
+        if not consumer_id:
+            return None
+        try:
+            runtime = get_consumer_runtime(self.hass, self._entry.entry_id, consumer_id)
+            consumer_type = consumer.get(CONSUMER_TYPE)
+            priority = self._format_priority(consumer.get(CONSUMER_PRIORITY), fallback_priority)
+            name = consumer.get(CONSUMER_NAME, consumer_id)
+
+            if consumer_type == CONSUMER_TYPE_CONTROLLED:
+                cmd_w = runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
+                try:
+                    cmd_w_value = float(cmd_w or 0.0)
+                except (TypeError, ValueError):
+                    cmd_w_value = 0.0
+                state = "RUNNING" if cmd_w_value > 0 else "OFF"
+                cmd_part = f" {round(cmd_w_value)}W"
+                type_label = "controlled"
+            else:
+                is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
+                state = "ON" if is_on else "OFF"
+                cmd_part = ""
+                type_label = "binary" if consumer_type == CONSUMER_TYPE_BINARY else "other"
+
+            return f"{priority}: {name} ({type_label}) {state}{cmd_part}".strip()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception(
+                "Failed to format priority list entry for consumer %s on %s: %s",
+                consumer_id,
+                self._entry.entry_id,
+                err,
+            )
+            return None
+
+    @property
+    def native_value(self) -> str:
+        try:
+            if not self._consumers:
+                return "empty"
+
+            entries: list[str] = []
+            for index, consumer in enumerate(self._consumers):
+                formatted = self._format_consumer_state(consumer, index + 1)
+                if formatted:
+                    entries.append(formatted)
+
+            if not entries:
+                return "empty"
+
+            return self._truncate("; ".join(entries))
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to build priority list for %s: %s", self._entry.entry_id, err)
+            return "error"
 
 
 class BatterySOCSensor(SensorEntity):

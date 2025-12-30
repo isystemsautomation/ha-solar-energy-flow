@@ -517,12 +517,19 @@ class ConsumerStateSensor(_BaseConsumerRuntimeSensor):
 
     @property
     def native_value(self):
-        runtime = self._runtime()
+        coordinator = getattr(self, "coordinator", None)
+        if coordinator is None:
+            return "OFF"
+        runtime_store = getattr(coordinator, "consumer_runtime", None)
+        runtime = runtime_store.get(self._consumer_id, {}) if isinstance(runtime_store, dict) else {}
         if self._consumer_type == CONSUMER_TYPE_BINARY:
             is_on = bool(runtime.get(RUNTIME_FIELD_IS_ON, False))
             return "RUNNING" if is_on else "OFF"
-        cmd_w = runtime.get(RUNTIME_FIELD_CMD_W, 0.0)
-        return "OFF" if abs(cmd_w) < 1e-6 else "RUNNING"
+        try:
+            cmd_w = float(runtime.get(RUNTIME_FIELD_CMD_W) or 0.0)
+        except (TypeError, ValueError):
+            cmd_w = 0.0
+        return "RUNNING" if cmd_w > 0 else "OFF"
 
 
 class ConsumerStartTimerSensor(_BaseConsumerRuntimeSensor):

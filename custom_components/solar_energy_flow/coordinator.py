@@ -108,11 +108,13 @@ from .const import (
 )
 from .consumer_bindings import get_consumer_binding
 from .helpers import (
+    ENTRY_DATA_CONSUMER_RUNTIME,
     RUNTIME_FIELD_CMD_W,
     RUNTIME_FIELD_IS_ON,
     RUNTIME_FIELD_START_TIMER_S,
     RUNTIME_FIELD_STOP_TIMER_S,
     async_dispatch_consumer_runtime_update,
+    get_entry_data,
     get_consumer_runtime,
 )
 from .pid import PID, PIDConfig, PIDStepResult
@@ -389,6 +391,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self.entry = entry
         self.options_cache: dict[str, Any] = dict(entry.options)
         self._runtime_mode = entry.options.get(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        self.consumer_runtime: dict[str, dict[str, float]] = get_entry_data(
+            hass, entry.entry_id
+        ).setdefault(ENTRY_DATA_CONSUMER_RUNTIME, {})
 
         interval = _get_update_interval_seconds(entry)
         super().__init__(

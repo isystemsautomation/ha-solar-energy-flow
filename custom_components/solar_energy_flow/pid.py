@@ -50,6 +50,10 @@ class PID:
         self._prev_t = None
         self._prev_error = None
 
+    def reset_prev_pv(self) -> None:
+        """Reset previous PV to None (e.g., when switching between different PV ranges)."""
+        self._prev_pv = None
+
     def apply_options(self, cfg: PIDConfig) -> None:
         """Apply new tuning without resetting accumulated state."""
 
@@ -96,6 +100,9 @@ class PID:
 
         if dt > 0:
             self._integral += self.cfg.ki * error * dt + self._kaw * (u_out - u_pid) * dt
+            min_i = self.cfg.min_output - p - d
+            max_i = self.cfg.max_output - p - d
+            self._integral = max(min_i, min(max_i, self._integral))
 
         self._prev_pv = pv
         self._prev_t = now
@@ -104,7 +111,7 @@ class PID:
             output=u_out,
             error=error,
             p_term=p,
-            i_term=i,
+            i_term=self._integral,
             d_term=d,
             output_pre_rate_limit=u_sat,
         )

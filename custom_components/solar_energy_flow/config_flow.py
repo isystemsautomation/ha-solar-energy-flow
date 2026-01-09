@@ -112,6 +112,18 @@ def _extract_domain(entity_id: str | None) -> str | None:
     return entity_id.split(".", 1)[0]
 
 
+def _normalize_battery_soc_entity(value: str | None) -> str | None:
+    """Normalize battery_soc_entity value - return None if empty/None, otherwise return trimmed string."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value or value == "None":
+            return None
+        return value
+    return None
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -133,9 +145,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
             
             # Only validate battery_soc_entity if it's provided and not empty
-            battery_soc_entity_value = user_input.get(CONF_BATTERY_SOC_ENTITY)
-            if battery_soc_entity_value and isinstance(battery_soc_entity_value, str) and battery_soc_entity_value.strip():
-                battery_soc_domain = _extract_domain(battery_soc_entity_value.strip())
+            battery_soc_entity_value = _normalize_battery_soc_entity(user_input.get(CONF_BATTERY_SOC_ENTITY))
+            if battery_soc_entity_value:
+                battery_soc_domain = _extract_domain(battery_soc_entity_value)
                 if battery_soc_domain and battery_soc_domain not in _BATTERY_SOC_DOMAINS:
                     errors[CONF_BATTERY_SOC_ENTITY] = "invalid_battery_soc_domain"
 
@@ -173,13 +185,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
             name = user_input.pop(CONF_NAME)
-            # Remove battery_soc_entity from data if it's empty or None
-            battery_soc_value = user_input.get(CONF_BATTERY_SOC_ENTITY)
-            if not battery_soc_value or (isinstance(battery_soc_value, str) and not battery_soc_value.strip()):
-                user_input.pop(CONF_BATTERY_SOC_ENTITY, None)
+            # Normalize battery_soc_entity - remove if empty/None
+            battery_soc_value = _normalize_battery_soc_entity(user_input.get(CONF_BATTERY_SOC_ENTITY))
+            if battery_soc_value:
+                user_input[CONF_BATTERY_SOC_ENTITY] = battery_soc_value
             else:
-                # Ensure it's a clean string value
-                user_input[CONF_BATTERY_SOC_ENTITY] = battery_soc_value.strip() if isinstance(battery_soc_value, str) else battery_soc_value
+                user_input.pop(CONF_BATTERY_SOC_ENTITY, None)
             return self.async_create_entry(title=name, data=user_input)
 
         return self.async_show_form(step_id="user", data_schema=self._build_user_schema(), errors=errors)
@@ -335,11 +346,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_GRID_POWER_ENTITY: o.get(
                 CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY, "")
             ),
-            CONF_BATTERY_SOC_ENTITY: (
-                (value := o.get(CONF_BATTERY_SOC_ENTITY, self._config_entry.data.get(CONF_BATTERY_SOC_ENTITY)))
-                if value and isinstance(value, str) and value.strip()
-                else ""
-            ),
+            CONF_BATTERY_SOC_ENTITY: _normalize_battery_soc_entity(
+                o.get(CONF_BATTERY_SOC_ENTITY, self._config_entry.data.get(CONF_BATTERY_SOC_ENTITY))
+            ) or "",
             CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
             CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
             CONF_GRID_POWER_INVERT: o.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
@@ -381,20 +390,13 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             }
             
             # Handle battery_soc_entity separately - it's optional, so only include if it has a valid non-empty value
-            battery_soc_value = user_input.get(CONF_BATTERY_SOC_ENTITY, defaults.get(CONF_BATTERY_SOC_ENTITY, ""))
-            # Handle None, empty string, or the string "None" - treat all as empty
-            if (
-                battery_soc_value is None
-                or battery_soc_value == "None"
-                or (isinstance(battery_soc_value, str) and not battery_soc_value.strip())
-            ):
-                # Don't include it in cleaned - it's optional
-                pass
-            elif isinstance(battery_soc_value, str) and battery_soc_value.strip():
-                # Only include if it's a valid non-empty string
-                cleaned[CONF_BATTERY_SOC_ENTITY] = battery_soc_value.strip()
+            battery_soc_value = _normalize_battery_soc_entity(
+                user_input.get(CONF_BATTERY_SOC_ENTITY, defaults.get(CONF_BATTERY_SOC_ENTITY))
+            )
+            if battery_soc_value:
+                cleaned[CONF_BATTERY_SOC_ENTITY] = battery_soc_value
                 # Validate the domain
-                battery_soc_domain = _extract_domain(battery_soc_value.strip())
+                battery_soc_domain = _extract_domain(battery_soc_value)
                 if battery_soc_domain and battery_soc_domain not in _BATTERY_SOC_DOMAINS:
                     errors[CONF_BATTERY_SOC_ENTITY] = "invalid_battery_soc_domain"
 
@@ -448,13 +450,11 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 )
 
             options = {**preserved, **cleaned}
-            # Remove battery_soc_entity from options if it's empty, None, or "None"
-            battery_soc_in_options = options.get(CONF_BATTERY_SOC_ENTITY)
-            if (
-                not battery_soc_in_options
-                or battery_soc_in_options == "None"
-                or (isinstance(battery_soc_in_options, str) and not battery_soc_in_options.strip())
-            ):
+            # Normalize battery_soc_entity - remove if empty/None
+            battery_soc_in_options = _normalize_battery_soc_entity(options.get(CONF_BATTERY_SOC_ENTITY))
+            if battery_soc_in_options:
+                options[CONF_BATTERY_SOC_ENTITY] = battery_soc_in_options
+            else:
                 options.pop(CONF_BATTERY_SOC_ENTITY, None)
             options[CONF_CONSUMERS] = self._consumers
             return self.async_create_entry(title="", data=options)

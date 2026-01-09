@@ -217,7 +217,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
                 ),
                 vol.Optional(CONF_BATTERY_SOC_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS), allow_custom_entity=True)
+                    selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))
                 ),
                 vol.Required(CONF_PV_MIN, default=DEFAULT_PV_MIN): vol.Coerce(float),
                 vol.Required(CONF_PV_MAX, default=DEFAULT_PV_MAX): vol.Coerce(float),
@@ -264,48 +264,55 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
 
     @staticmethod
     def _build_schema(defaults: dict) -> vol.Schema:
-        return vol.Schema(
-            {
-                vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(_PV_DOMAINS))
-                ),
-                vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(_SETPOINT_DOMAINS))
-                ),
-                vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(_OUTPUT_DOMAINS))
-                ),
-                vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
-                ),
-                vol.Optional(
-                    CONF_BATTERY_SOC_ENTITY, 
-                    default=defaults.get(CONF_BATTERY_SOC_ENTITY) or ""
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))
-                ),
-                vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
-                vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
-                vol.Optional(
-                    CONF_GRID_POWER_INVERT,
-                    default=defaults.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
-                ): bool,
-                vol.Optional(
-                    CONF_PID_MODE,
-                    default=defaults.get(CONF_PID_MODE, DEFAULT_PID_MODE),
-                ): vol.In([PID_MODE_DIRECT, PID_MODE_REVERSE]),
-                vol.Optional(
-                    CONF_UPDATE_INTERVAL,
-                    default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
-                vol.Required(CONF_PV_MIN, default=defaults[CONF_PV_MIN]): vol.Coerce(float),
-                vol.Required(CONF_PV_MAX, default=defaults[CONF_PV_MAX]): vol.Coerce(float),
-                vol.Required(CONF_SP_MIN, default=defaults[CONF_SP_MIN]): vol.Coerce(float),
-                vol.Required(CONF_SP_MAX, default=defaults[CONF_SP_MAX]): vol.Coerce(float),
-                vol.Required(CONF_GRID_MIN, default=defaults[CONF_GRID_MIN]): vol.Coerce(float),
-                vol.Required(CONF_GRID_MAX, default=defaults[CONF_GRID_MAX]): vol.Coerce(float),
-            }
-        )
+        schema_dict = {
+            vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=list(_PV_DOMAINS))
+            ),
+            vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=list(_SETPOINT_DOMAINS))
+            ),
+            vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=list(_OUTPUT_DOMAINS))
+            ),
+            vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
+            ),
+        }
+        
+        # Only add default for battery_soc_entity if we have a valid value
+        battery_soc_default = defaults.get(CONF_BATTERY_SOC_ENTITY)
+        if battery_soc_default:
+            schema_dict[CONF_BATTERY_SOC_ENTITY] = vol.Optional(
+                CONF_BATTERY_SOC_ENTITY, default=battery_soc_default
+            )(selector.EntitySelector(selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))))
+        else:
+            schema_dict[CONF_BATTERY_SOC_ENTITY] = vol.Optional(CONF_BATTERY_SOC_ENTITY)(
+                selector.EntitySelector(selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS)))
+            )
+        
+        schema_dict.update({
+            vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
+            vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
+            vol.Optional(
+                CONF_GRID_POWER_INVERT,
+                default=defaults.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
+            ): bool,
+            vol.Optional(
+                CONF_PID_MODE,
+                default=defaults.get(CONF_PID_MODE, DEFAULT_PID_MODE),
+            ): vol.In([PID_MODE_DIRECT, PID_MODE_REVERSE]),
+            vol.Optional(
+                CONF_UPDATE_INTERVAL,
+                default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+            vol.Required(CONF_PV_MIN, default=defaults[CONF_PV_MIN]): vol.Coerce(float),
+            vol.Required(CONF_PV_MAX, default=defaults[CONF_PV_MAX]): vol.Coerce(float),
+            vol.Required(CONF_SP_MIN, default=defaults[CONF_SP_MIN]): vol.Coerce(float),
+            vol.Required(CONF_SP_MAX, default=defaults[CONF_SP_MAX]): vol.Coerce(float),
+            vol.Required(CONF_GRID_MIN, default=defaults[CONF_GRID_MIN]): vol.Coerce(float),
+            vol.Required(CONF_GRID_MAX, default=defaults[CONF_GRID_MAX]): vol.Coerce(float),
+        })
+        return vol.Schema(schema_dict)
 
     async def async_step_init_settings(self, user_input=None):
         o = self._config_entry.options
@@ -348,7 +355,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             ),
             CONF_BATTERY_SOC_ENTITY: _normalize_battery_soc_entity(
                 o.get(CONF_BATTERY_SOC_ENTITY, self._config_entry.data.get(CONF_BATTERY_SOC_ENTITY))
-            ) or "",
+            ),
             CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
             CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
             CONF_GRID_POWER_INVERT: o.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),

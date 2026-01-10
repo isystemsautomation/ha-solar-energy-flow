@@ -8,6 +8,7 @@ from homeassistant.helpers import device_registry as dr
 
 from .const import (
     CONF_DIVIDER_ENABLED,
+    CONSUMER_DEVICE_SUFFIX,
     DEFAULT_DIVIDER_ENABLED,
     DOMAIN,
     PLATFORMS,
@@ -63,7 +64,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Remove Divider device if it exists but divider is disabled
         divider_device = device_registry.async_get_device(identifiers={divider_identifier})
         if divider_device and entry.entry_id in divider_device.config_entries:
-            device_registry.async_remove_device(divider_device.id)
+            try:
+                device_registry.async_remove_device(divider_device.id)
+            except Exception:
+                _LOGGER.debug("Could not remove divider device %s, will be cleaned up later", divider_device.id)
+        
+        # Remove all consumer devices when divider is disabled
+        # Iterate through all devices and check if they're consumer devices for this entry
+        consumer_device_prefix = f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_"
+        devices_to_remove = []
+        
+        for device in device_registry.devices.values():
+            # Check if this device belongs to this config entry
+            if entry.entry_id not in device.config_entries:
+                continue
+            
+            # Check if this device is a consumer device
+            # Consumer devices have identifiers like (DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{consumer_id}")
+            for identifier_tuple in device.identifiers:
+                if (
+                    len(identifier_tuple) == 2
+                    and identifier_tuple[0] == DOMAIN
+                    and identifier_tuple[1].startswith(consumer_device_prefix)
+                ):
+                    devices_to_remove.append(device.id)
+                    break
+        
+        # Remove consumer devices
+        for device_id in devices_to_remove:
+            try:
+                device_registry.async_remove_device(device_id)
+                _LOGGER.debug("Removed consumer device %s (divider disabled)", device_id)
+            except Exception:
+                _LOGGER.debug("Could not remove consumer device %s, will be cleaned up later", device_id)
     
     # Remove hub device if it exists (it shouldn't appear in UI since no entities attach to it directly)
     # PID and Divider devices are now direct children of the config entry, not the hub

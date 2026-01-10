@@ -7,6 +7,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
+    CONF_DIVIDER_ENABLED,
+    DEFAULT_DIVIDER_ENABLED,
     DOMAIN,
     PLATFORMS,
     HUB_DEVICE_SUFFIX,
@@ -53,14 +55,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="PID Controller",
     )
 
-    device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={divider_identifier},
-        via_device=hub_identifier,
-        name=f"{entry.title} Energy Divider",
-        manufacturer="Solar Energy Flow",
-        model="Energy Divider",
-    )
+    # Only create Divider device if divider is enabled, otherwise remove it if it exists
+    divider_enabled = entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
+    divider_device = device_registry.async_get_device(identifiers={divider_identifier})
+    
+    if divider_enabled:
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={divider_identifier},
+            via_device=hub_identifier,
+            name=f"{entry.title} Energy Divider",
+            manufacturer="Solar Energy Flow",
+            model="Energy Divider",
+        )
+    elif divider_device:
+        # Remove Divider device if it exists but divider is disabled
+        device_registry.async_remove_device(divider_device.id)
 
     await coordinator.async_config_entry_first_refresh()
 

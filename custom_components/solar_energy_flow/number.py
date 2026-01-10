@@ -47,12 +47,14 @@ from .const import (
     PID_DEVICE_SUFFIX,
     DIVIDER_DEVICE_SUFFIX,
     CONF_CONSUMERS,
+    CONF_DIVIDER_ENABLED,
     CONSUMER_TYPE,
     CONSUMER_TYPE_CONTROLLED,
     CONSUMER_TYPE_BINARY,
     CONSUMER_DEVICE_SUFFIX,
     CONSUMER_ID,
     CONSUMER_NAME,
+    DEFAULT_DIVIDER_ENABLED,
     CONSUMER_DEFAULT_START_DELAY_S,
     CONSUMER_DEFAULT_STOP_DELAY_S,
     CONSUMER_MIN_POWER_W,
@@ -209,16 +211,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         ),
     ]
 
-    consumers = entry.options.get(CONF_CONSUMERS, [])
-    for consumer in consumers:
-        if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
-            entities.append(SolarEnergyFlowConsumerNumber(entry, consumer))
-            entities.append(SolarEnergyFlowConsumerStepNumber(entry, consumer))
-            entities.append(SolarEnergyFlowConsumerPidDeadbandNumber(entry, consumer))
-        else:
-            entities.append(SolarEnergyFlowBinaryConsumerThresholdNumber(entry, consumer))
-        entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, True))
-        entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, False))
+    # Only create consumer number entities if divider is enabled
+    divider_enabled = entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
+    if divider_enabled:
+        consumers = entry.options.get(CONF_CONSUMERS, [])
+        for consumer in consumers:
+            if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
+                entities.append(SolarEnergyFlowConsumerNumber(entry, consumer))
+                entities.append(SolarEnergyFlowConsumerStepNumber(entry, consumer))
+                entities.append(SolarEnergyFlowConsumerPidDeadbandNumber(entry, consumer))
+            else:
+                entities.append(SolarEnergyFlowBinaryConsumerThresholdNumber(entry, consumer))
+            entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, True))
+            entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, False))
 
     async_add_entities(entities)
 

@@ -39,23 +39,27 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
-    consumers = list(entry.options.get(CONF_CONSUMERS, []))
+    divider_enabled = entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
+    consumers = list(entry.options.get(CONF_CONSUMERS, [])) if divider_enabled else []
 
     entities: list[SwitchEntity] = [
         SolarEnergyFlowEnabledSwitch(coordinator, entry),
         SolarEnergyFlowGridLimiterSwitch(coordinator, entry),
         SolarEnergyFlowRateLimiterSwitch(coordinator, entry),
-        EnergyDividerEnabledSwitch(coordinator, entry),
     ]
 
-    for consumer in consumers:
-        entities.append(SolarEnergyFlowConsumerSwitch(entry, consumer))
+    # Only create divider switch and consumer switches if divider is enabled
+    if divider_enabled:
+        entities.append(EnergyDividerEnabledSwitch(coordinator, entry))
+        for consumer in consumers:
+            entities.append(SolarEnergyFlowConsumerSwitch(entry, consumer))
 
     async_add_entities(entities)
 
-    entry.async_on_unload(
-        entry.add_update_listener(_async_reload_on_consumer_change(consumers))
-    )
+    if divider_enabled:
+        entry.async_on_unload(
+            entry.add_update_listener(_async_reload_on_consumer_change(consumers))
+        )
 
 
 def _async_reload_on_consumer_change(initial_consumers: list[dict[str, Any]]):

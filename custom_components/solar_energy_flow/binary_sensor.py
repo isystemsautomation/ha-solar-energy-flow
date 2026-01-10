@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CONF_CONSUMERS,
+    CONF_DIVIDER_ENABLED,
     CONSUMER_DEVICE_SUFFIX,
     CONSUMER_ID,
     CONSUMER_MAX_POWER_W,
@@ -20,6 +21,7 @@ from .const import (
     CONSUMER_TYPE,
     CONSUMER_TYPE_CONTROLLED,
     CONSUMER_TYPE_BINARY,
+    DEFAULT_DIVIDER_ENABLED,
     DIVIDER_DEVICE_SUFFIX,
     DOMAIN,
 )
@@ -33,20 +35,25 @@ from .helpers import (
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    consumers = entry.options.get(CONF_CONSUMERS, [])
+    divider_enabled = entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
+    consumers = entry.options.get(CONF_CONSUMERS, []) if divider_enabled else []
     entities: list[BinarySensorEntity] = []
 
-    for consumer in consumers:
-        if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
-            entities.append(ConsumerAtMinBinarySensor(entry, consumer))
-            entities.append(ConsumerAtMaxBinarySensor(entry, consumer))
-        elif consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_BINARY:
-            entities.append(BinaryConsumerActiveBinarySensor(entry, consumer))
+    # Only create consumer binary sensors if divider is enabled
+    if divider_enabled:
+        for consumer in consumers:
+            if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
+                entities.append(ConsumerAtMinBinarySensor(entry, consumer))
+                entities.append(ConsumerAtMaxBinarySensor(entry, consumer))
+            elif consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_BINARY:
+                entities.append(BinaryConsumerActiveBinarySensor(entry, consumer))
 
     async_add_entities(entities)
 
-    for consumer in consumers:
-        async_dispatch_consumer_runtime_update(hass, entry.entry_id, consumer[CONSUMER_ID])
+    # Only dispatch consumer runtime updates if divider is enabled
+    if divider_enabled:
+        for consumer in consumers:
+            async_dispatch_consumer_runtime_update(hass, entry.entry_id, consumer[CONSUMER_ID])
 
 
 class _BaseConsumerRuntimeBinarySensor(BinarySensorEntity):

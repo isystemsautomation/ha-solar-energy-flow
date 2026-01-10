@@ -50,6 +50,7 @@ from .const import (
     CONF_SP_MAX,
     CONF_GRID_MIN,
     CONF_GRID_MAX,
+    CONF_DIVIDER_ENABLED,
     DEFAULT_INVERT_PV,
     DEFAULT_INVERT_SP,
     DEFAULT_GRID_POWER_INVERT,
@@ -69,6 +70,7 @@ from .const import (
     DEFAULT_SP_MAX,
     DEFAULT_GRID_MIN,
     DEFAULT_GRID_MAX,
+    DEFAULT_DIVIDER_ENABLED,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
     CONF_CONSUMERS,
@@ -301,6 +303,10 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Required(CONF_SP_MAX, default=defaults[CONF_SP_MAX]): vol.Coerce(float),
             vol.Required(CONF_GRID_MIN, default=defaults[CONF_GRID_MIN]): vol.Coerce(float),
             vol.Required(CONF_GRID_MAX, default=defaults[CONF_GRID_MAX]): vol.Coerce(float),
+            vol.Optional(
+                CONF_DIVIDER_ENABLED,
+                default=defaults.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED),
+            ): bool,
         }
         
         # Add battery_soc_entity - only include default if we have a valid non-empty string value
@@ -374,6 +380,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_SP_MAX: round(float(o.get(CONF_SP_MAX, self._config_entry.data.get(CONF_SP_MAX, DEFAULT_SP_MAX))), 1),
             CONF_GRID_MIN: round(float(o.get(CONF_GRID_MIN, self._config_entry.data.get(CONF_GRID_MIN, DEFAULT_GRID_MIN))), 1),
             CONF_GRID_MAX: round(float(o.get(CONF_GRID_MAX, self._config_entry.data.get(CONF_GRID_MAX, DEFAULT_GRID_MAX))), 1),
+            CONF_DIVIDER_ENABLED: o.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED),
         }
 
         if user_input is not None:
@@ -397,6 +404,7 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_SP_MAX: round(float(user_input.get(CONF_SP_MAX, defaults[CONF_SP_MAX])), 1),
                 CONF_GRID_MIN: round(float(user_input.get(CONF_GRID_MIN, defaults[CONF_GRID_MIN])), 1),
                 CONF_GRID_MAX: round(float(user_input.get(CONF_GRID_MAX, defaults[CONF_GRID_MAX])), 1),
+                CONF_DIVIDER_ENABLED: user_input.get(CONF_DIVIDER_ENABLED, defaults[CONF_DIVIDER_ENABLED]),
             }
             
             # Handle battery_soc_entity separately - it's optional, so only include if it has a valid non-empty value
@@ -504,14 +512,20 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
         )
 
     async def async_step_init(self, user_input=None):
-        return self.async_show_menu(
-            step_id="init",
-            menu_options={
-                "configure": "configure",
+        # Only show consumer menu items if divider is enabled
+        divider_enabled = self._config_entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
+        menu_options = {"configure": "configure"}
+        
+        if divider_enabled:
+            menu_options.update({
                 "add_consumer": "add_consumer",
                 "edit_consumer": "edit_consumer",
                 "remove_consumer": "remove_consumer",
-            },
+            })
+        
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=menu_options,
         )
 
     async def async_step_configure(self, user_input=None):

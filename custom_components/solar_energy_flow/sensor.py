@@ -17,6 +17,7 @@ from .consumer_bindings import get_consumer_binding
 from .const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_CONSUMERS,
+    CONF_DIVIDER_ENABLED,
     CONSUMER_DEVICE_SUFFIX,
     CONSUMER_ID,
     CONSUMER_TYPE_BINARY,
@@ -29,6 +30,7 @@ from .const import (
     CONSUMER_TYPE_CONTROLLED,
     CONSUMER_PRIORITY,
     CONSUMER_STATE_ENTITY_ID,
+    DEFAULT_DIVIDER_ENABLED,
     DOMAIN,
     DIVIDER_DEVICE_SUFFIX,
     HUB_DEVICE_SUFFIX,
@@ -51,9 +53,11 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
-    consumers = entry.options.get(CONF_CONSUMERS, [])
+    divider_enabled = entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
+    consumers = entry.options.get(CONF_CONSUMERS, []) if divider_enabled else []
     if not isinstance(consumers, list):
         consumers = []
+    
     entities: list[SensorEntity] = [
         SolarEnergyFlowEffectiveSPSensor(coordinator, entry),
         SolarEnergyFlowPVValueSensor(coordinator, entry),
@@ -66,16 +70,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         SolarEnergyFlowDTermSensor(coordinator, entry),
         SolarEnergyFlowLimiterStateSensor(coordinator, entry),
         SolarEnergyFlowOutputPreRateLimitSensor(coordinator, entry),
-        EnergyDividerPIDOutputPctSensor(coordinator, entry),
-        EnergyDividerDeltaWSensor(coordinator, entry),
-        EnergyDividerActiveConsumerSensor(coordinator, entry),
-        EnergyDividerActivePrioritySensor(coordinator, entry),
-        EnergyDividerConsumersSummarySensor(coordinator, entry, consumers),
-        EnergyDividerTotalPowerSensor(coordinator, entry, consumers),
-        EnergyDividerPriorityListSensor(coordinator, entry, consumers),
-        EnergyDividerStateSensor(coordinator, entry),
-        EnergyDividerReasonSensor(coordinator, entry),
     ]
+
+    # Only create divider-related sensors if divider is enabled
+    if divider_enabled:
+        entities.extend([
+            EnergyDividerPIDOutputPctSensor(coordinator, entry),
+            EnergyDividerDeltaWSensor(coordinator, entry),
+            EnergyDividerActiveConsumerSensor(coordinator, entry),
+            EnergyDividerActivePrioritySensor(coordinator, entry),
+            EnergyDividerConsumersSummarySensor(coordinator, entry, consumers),
+            EnergyDividerTotalPowerSensor(coordinator, entry, consumers),
+            EnergyDividerPriorityListSensor(coordinator, entry, consumers),
+            EnergyDividerStateSensor(coordinator, entry),
+            EnergyDividerReasonSensor(coordinator, entry),
+        ])
 
     if CONF_BATTERY_SOC_ENTITY in entry.options:
         battery_soc_entity = entry.options.get(CONF_BATTERY_SOC_ENTITY)
@@ -84,21 +93,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     if battery_soc_entity:
         entities.append(BatterySOCSensor(entry, battery_soc_entity))
 
-    for consumer in consumers:
-        entities.extend(
-            [
-                ConsumerPIDOutputPctSensor(coordinator, entry, consumer),
-                ConsumerDeltaWSensor(coordinator, entry, consumer),
-            ]
-        )
-        entities.append(ConsumerStateSensor(entry, consumer))
-        entities.append(ConsumerStartTimerSensor(entry, consumer))
-        entities.append(ConsumerStopTimerSensor(entry, consumer))
-        entities.append(ConsumerReasonSensor(entry, consumer))
-        if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
-            entities.append(ConsumerCommandedPowerSensor(entry, consumer))
-        elif consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_BINARY:
-            entities.append(ConsumerAssumedPowerSensor(entry, consumer))
+    # Only create consumer sensors if divider is enabled
+    if divider_enabled:
+        for consumer in consumers:
+            entities.extend(
+                [
+                    ConsumerPIDOutputPctSensor(coordinator, entry, consumer),
+                    ConsumerDeltaWSensor(coordinator, entry, consumer),
+                ]
+            )
+            entities.append(ConsumerStateSensor(entry, consumer))
+            entities.append(ConsumerStartTimerSensor(entry, consumer))
+            entities.append(ConsumerStopTimerSensor(entry, consumer))
+            entities.append(ConsumerReasonSensor(entry, consumer))
+            if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
+                entities.append(ConsumerCommandedPowerSensor(entry, consumer))
+            elif consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_BINARY:
+                entities.append(ConsumerAssumedPowerSensor(entry, consumer))
 
     async_add_entities(entities)
 

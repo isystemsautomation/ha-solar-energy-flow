@@ -153,23 +153,42 @@ class PIDControllerMini extends LitElement {
   updated(changedProperties) {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
       this._updateData();
-      this._updateGraph();
     }
-    if (changedProperties.has("hass")) {
-      this._updateGraph();
+    // Update graph after a short delay to ensure DOM is ready
+    if (changedProperties.has("hass") || changedProperties.has("config")) {
+      setTimeout(() => this._updateGraph(), 100);
     }
   }
 
-  _updateGraph() {
+  firstUpdated() {
+    // Create graph after first render
+    setTimeout(() => this._updateGraph(), 200);
+  }
+
+  async _updateGraph() {
     const entityIds = this._getEntityIds();
-    if (!entityIds || !this.hass) return;
+    if (!entityIds || !this.hass) {
+      return;
+    }
+
+    // Verify entities exist
+    const pvExists = this.hass.states[entityIds.pv];
+    const spExists = this.hass.states[entityIds.sp];
+    const outputExists = this.hass.states[entityIds.output];
+    
+    if (!pvExists || !spExists || !outputExists) {
+      console.warn("PID Mini: Some entities not found", { pv: pvExists, sp: spExists, output: outputExists });
+      return;
+    }
 
     const container = this.shadowRoot?.getElementById("graph-container");
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     // Don't recreate if already exists
-    if (container.querySelector("hui-history-graph-card")) {
-      const existingCard = container.querySelector("hui-history-graph-card");
+    const existingCard = container.querySelector("hui-history-graph-card");
+    if (existingCard) {
       if (existingCard.hass !== this.hass) {
         existingCard.hass = this.hass;
       }
@@ -179,40 +198,36 @@ class PIDControllerMini extends LitElement {
     // Clear existing graph
     container.innerHTML = "";
 
-    // Create history graph card using Home Assistant's card creator
-    if (window.loadCardHelpers) {
-      window.loadCardHelpers().then((helpers) => {
-        const cardConfig = {
-          type: "history-graph",
-          entities: [
-            {
-              entity: entityIds.pv,
-              name: "PV"
-            },
-            {
-              entity: entityIds.sp,
-              name: "SP"
-            },
-            {
-              entity: entityIds.output,
-              name: "Output"
-            }
-          ],
-          hours_to_show: 1,
-          refresh_interval: 30,
-        };
+    // Try to load card helpers
+    try {
+      const helpers = await window.loadCardHelpers();
+      
+      const cardConfig = {
+        type: "history-graph",
+        entities: [
+          entityIds.pv,
+          entityIds.sp,
+          entityIds.output
+        ],
+        hours_to_show: 1,
+        refresh_interval: 30,
+      };
 
-        const card = helpers.createCardElement(cardConfig);
-        card.hass = this.hass;
-        container.appendChild(card);
-      }).catch((err) => {
-        console.error("Failed to create history graph:", err);
-        // Fallback: create simple text if card helper fails
-        container.innerHTML = "<div style='padding: 8px; color: var(--secondary-text-color); font-size: 12px;'>Graph unavailable</div>";
-      });
-    } else {
-      // Fallback if loadCardHelpers is not available
-      container.innerHTML = "<div style='padding: 8px; color: var(--secondary-text-color); font-size: 12px;'>Graph unavailable</div>";
+      const card = helpers.createCardElement(cardConfig);
+      card.hass = this.hass;
+      container.appendChild(card);
+      
+      // Force update after a short delay to ensure rendering
+      setTimeout(() => {
+        if (card.updateComplete) {
+          card.updateComplete.then(() => {
+            card.requestUpdate();
+          });
+        }
+      }, 100);
+    } catch (err) {
+      console.error("PID Mini: Failed to create history graph:", err);
+      container.innerHTML = `<div style='padding: 8px; color: var(--error-color, red); font-size: 12px;'>Graph error: ${err.message || err}</div>`;
     }
   }
 
@@ -379,9 +394,7 @@ class PIDControllerMini extends LitElement {
           </div>
         </div>
 
-        ${this._getEntityIds() ? html`
-          <div class="graph-container" id="graph-container"></div>
-        ` : ""}
+        <div class="graph-container" id="graph-container"></div>
 
         <div class="actions">
           <mwc-button outlined label="Open Editor" @click=${this._openPopup}></mwc-button>

@@ -518,18 +518,10 @@ class PIDControllerMini extends LitElement {
     }
 
     const dialog = document.createElement("ha-dialog");
-    dialog.heading = this.config.title || "PID Controller";
+    dialog.heading = "";
     dialog.hideActions = false;
     dialog.scrimClickAction = "close";
     dialog.escapeKeyAction = "close";
-    
-    const closeButton = document.createElement("mwc-icon-button");
-    closeButton.setAttribute("slot", "heading");
-    closeButton.style.cssText = "position: absolute; left: 8px; top: 50%; transform: translateY(-50%); --mdc-icon-button-size: 40px; --mdc-icon-size: 24px;";
-    const closeIcon = document.createElement("ha-icon");
-    closeIcon.setAttribute("icon", "mdi:close");
-    closeButton.appendChild(closeIcon);
-    closeButton.addEventListener("click", () => dialog.close());
     
     const popupCard = document.createElement("pid-controller-popup");
     popupCard.setConfig({ pid_entity: this.config.pid_entity });
@@ -554,7 +546,6 @@ class PIDControllerMini extends LitElement {
       }
     });
     
-    dialog.appendChild(closeButton);
     dialog.appendChild(popupCard);
     document.body.appendChild(dialog);
     dialog.show();

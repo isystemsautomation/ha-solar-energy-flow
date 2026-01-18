@@ -11,11 +11,11 @@ class PIDControllerPopup extends LitElement {
   static styles = css`
     :host {
       display: block;
+      position: relative;
     }
 
     ha-card {
       padding: 16px;
-      position: relative;
     }
 
     .header {
@@ -25,7 +25,6 @@ class PIDControllerPopup extends LitElement {
       display: flex;
       justify-content: flex-start;
       align-items: center;
-      padding-left: 40px;
     }
 
     .title {
@@ -36,8 +35,8 @@ class PIDControllerPopup extends LitElement {
 
     .close-button {
       position: absolute;
-      top: 0;
-      left: 0;
+      top: -16px;
+      left: -16px;
       --mdc-icon-button-size: 40px;
       --mdc-icon-size: 24px;
       z-index: 10;

@@ -133,9 +133,24 @@ class SolarEnergyFlowStatusSensor(_BaseFlowSensor):
         # Get runtime options from coordinator
         options = self.coordinator._build_runtime_options()
         
+        # Get values from entry options
+        from .const import (
+            CONF_KP, CONF_KI, CONF_KD, CONF_MIN_OUTPUT, CONF_MAX_OUTPUT,
+            CONF_PID_DEADBAND, CONF_MANUAL_OUT_VALUE, CONF_MANUAL_SP_VALUE,
+            DEFAULT_KP, DEFAULT_KI, DEFAULT_KD, DEFAULT_MIN_OUTPUT, DEFAULT_MAX_OUTPUT,
+            DEFAULT_PID_DEADBAND, DEFAULT_MANUAL_OUT_VALUE, DEFAULT_MANUAL_SP_VALUE,
+            RUNTIME_MODE_AUTO_SP, RUNTIME_MODE_MANUAL_SP, RUNTIME_MODE_HOLD, RUNTIME_MODE_MANUAL_OUT,
+        )
+        
         return {
             "enabled": options.enabled,
             "runtime_mode": options.runtime_mode,
+            "runtime_modes": [
+                RUNTIME_MODE_AUTO_SP,
+                RUNTIME_MODE_MANUAL_SP,
+                RUNTIME_MODE_HOLD,
+                RUNTIME_MODE_MANUAL_OUT,
+            ],
             "pv_value": getattr(data, "pv", None),
             "effective_sp": getattr(data, "sp", None),
             "error": getattr(data, "error", None),
@@ -145,6 +160,16 @@ class SolarEnergyFlowStatusSensor(_BaseFlowSensor):
             "i_term": getattr(data, "i_term", None),
             "d_term": getattr(data, "d_term", None),
             "grid_power": getattr(data, "grid_power", None),
+            "kp": self._entry.options.get(CONF_KP, DEFAULT_KP),
+            "ki": self._entry.options.get(CONF_KI, DEFAULT_KI),
+            "kd": self._entry.options.get(CONF_KD, DEFAULT_KD),
+            "deadband": self._entry.options.get(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND),
+            "min_output": self._entry.options.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT),
+            "max_output": self._entry.options.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT),
+            "manual_out": self._entry.options.get(CONF_MANUAL_OUT_VALUE, DEFAULT_MANUAL_OUT_VALUE),
+            "manual_sp": self._entry.options.get(CONF_MANUAL_SP_VALUE, DEFAULT_MANUAL_SP_VALUE),
+            "limiter_state": getattr(data, "limiter_state", None),
+            "output_pre_rate_limit": getattr(data, "output_pre_rate_limit", None),
         }
 
 

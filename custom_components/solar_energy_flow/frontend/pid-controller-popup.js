@@ -11,7 +11,6 @@ class PIDControllerPopup extends LitElement {
   static styles = css`
     :host {
       display: block;
-      position: relative;
     }
 
     ha-card {
@@ -33,15 +32,6 @@ class PIDControllerPopup extends LitElement {
       color: var(--primary-text-color);
     }
 
-    .close-button {
-      position: absolute;
-      top: -16px;
-      left: -16px;
-      --mdc-icon-button-size: 40px;
-      --mdc-icon-size: 24px;
-      z-index: 10;
-      color: var(--primary-text-color);
-    }
 
     .section {
       margin-bottom: 24px;
@@ -952,9 +942,6 @@ class PIDControllerPopup extends LitElement {
       <ha-card>
         <div class="header">
           <div class="title">PID Controller Editor</div>
-          <mwc-icon-button class="close-button" @click=${this._close} title="Close">
-            <ha-icon icon="mdi:close"></ha-icon>
-          </mwc-icon-button>
         </div>
 
         <div class="graph-container" id="popup-graph-container"></div>

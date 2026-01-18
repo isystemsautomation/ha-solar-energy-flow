@@ -523,6 +523,14 @@ class PIDControllerMini extends LitElement {
     dialog.scrimClickAction = "close";
     dialog.escapeKeyAction = "close";
     
+    const closeButton = document.createElement("mwc-icon-button");
+    closeButton.setAttribute("slot", "heading");
+    closeButton.style.cssText = "position: absolute; left: 8px; top: 50%; transform: translateY(-50%); --mdc-icon-button-size: 40px; --mdc-icon-size: 24px;";
+    const closeIcon = document.createElement("ha-icon");
+    closeIcon.setAttribute("icon", "mdi:close");
+    closeButton.appendChild(closeIcon);
+    closeButton.addEventListener("click", () => dialog.close());
+    
     const popupCard = document.createElement("pid-controller-popup");
     popupCard.setConfig({ pid_entity: this.config.pid_entity });
     popupCard.hass = this.hass;
@@ -546,6 +554,7 @@ class PIDControllerMini extends LitElement {
       }
     });
     
+    dialog.appendChild(closeButton);
     dialog.appendChild(popupCard);
     document.body.appendChild(dialog);
     dialog.show();
@@ -568,51 +577,51 @@ class PIDControllerMini extends LitElement {
 
         <div class="compact-grid">
           ${this.config.show_status ? html`
-            <div class="metric">
-              <div class="metric-label">Status</div>
-              <div class="metric-value">
-                <span class="status-badge ${statusClass}">${d.status || "—"}</span>
-              </div>
+          <div class="metric">
+            <div class="metric-label">Status</div>
+            <div class="metric-value">
+              <span class="status-badge ${statusClass}">${d.status || "—"}</span>
             </div>
+          </div>
           ` : ""}
 
           ${this.config.show_mode ? html`
-            <div class="metric">
-              <div class="metric-label">Mode</div>
-              <div class="metric-value">${this._formatMode(d.runtime_mode)}</div>
-            </div>
+          <div class="metric">
+            <div class="metric-label">Mode</div>
+            <div class="metric-value">${this._formatMode(d.runtime_mode)}</div>
+          </div>
           ` : ""}
 
           ${this.config.show_pv ? html`
-            <div class="metric">
-              <div class="metric-label">PV</div>
-              <div class="metric-value">${this._formatValue(d.pv_value)}</div>
-            </div>
+          <div class="metric">
+            <div class="metric-label">PV</div>
+            <div class="metric-value">${this._formatValue(d.pv_value)}</div>
+          </div>
           ` : ""}
 
           ${this.config.show_sp ? html`
-            <div class="metric">
-              <div class="metric-label">SP</div>
-              <div class="metric-value">${this._formatValue(d.effective_sp)}</div>
-            </div>
+          <div class="metric">
+            <div class="metric-label">SP</div>
+            <div class="metric-value">${this._formatValue(d.effective_sp)}</div>
+          </div>
           ` : ""}
 
           ${this.config.show_error ? html`
-            <div class="metric">
-              <div class="metric-label">Error</div>
-              <div
-                class="metric-value ${d.error && d.error < 0 ? "negative" : ""}"
-              >
-                ${this._formatValue(d.error)}
-              </div>
+          <div class="metric">
+            <div class="metric-label">Error</div>
+            <div
+              class="metric-value ${d.error && d.error < 0 ? "negative" : ""}"
+            >
+              ${this._formatValue(d.error)}
             </div>
+          </div>
           ` : ""}
 
           ${this.config.show_output ? html`
-            <div class="metric">
-              <div class="metric-label">Output</div>
-              <div class="metric-value">${this._formatValue(d.output)}</div>
-            </div>
+          <div class="metric">
+            <div class="metric-label">Output</div>
+            <div class="metric-value">${this._formatValue(d.output)}</div>
+          </div>
           ` : ""}
         </div>
 

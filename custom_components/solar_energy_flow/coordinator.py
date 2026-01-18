@@ -918,8 +918,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             )
 
         error_pct = sp_for_pid - pv_for_pid
-            if options.pid_mode == PID_MODE_REVERSE:
-                error_pct = -error_pct
+        if options.pid_mode == PID_MODE_REVERSE:
+            error_pct = -error_pct
 
         if (
             limiter_result.limiter_state == GRID_LIMITER_STATE_NORMAL

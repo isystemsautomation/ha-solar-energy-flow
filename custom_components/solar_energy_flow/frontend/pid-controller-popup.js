@@ -227,7 +227,7 @@ class PIDControllerPopup extends LitElement {
     // Check if editable values changed on the entity (e.g., manual_sp was updated by another source)
     // Only update if we're not currently editing and haven't recently saved
     const now = Date.now();
-    const SAVE_TIMEOUT = 5000; // Increased timeout to prevent overwriting recently saved values
+    const SAVE_TIMEOUT = 10000; // Increased timeout to 10 seconds to prevent overwriting recently saved values
     
     // Check manual_sp specifically
     if (!this._editingFields.has("manual_sp")) {
@@ -240,12 +240,14 @@ class PIDControllerPopup extends LitElement {
         if (Math.abs((entityValue ?? 0) - (savedValue ?? 0)) < 0.01) {
           this._savedFields.delete("manual_sp");
         }
-        // Otherwise, keep our saved value and don't overwrite
+        // Otherwise, keep our saved value and don't overwrite - DO NOT UPDATE
+        // Skip to next field - don't update manual_sp
       } else if (!savedTime || (now - savedTime > SAVE_TIMEOUT)) {
         // Not recently saved, or timeout expired - update from entity
         const entityValue = attrs.manual_sp ?? null;
         const currentValue = this._data.manual_sp ?? null;
         if (Math.abs((entityValue ?? 0) - (currentValue ?? 0)) > 0.01) {
+          console.log(`manual_sp updating from entity (timeout expired): ${currentValue} -> ${entityValue}`);
           this._data.manual_sp = entityValue;
           hasChanges = true;
         }
@@ -351,7 +353,7 @@ class PIDControllerPopup extends LitElement {
     if (!state) return;
     
     const data = { ...this._data };
-    const SAVE_TIMEOUT = 5000; // Increased timeout to prevent overwriting recently saved values
+    const SAVE_TIMEOUT = 10000; // Increased timeout to 10 seconds to prevent overwriting recently saved values
 
     if (state?.attributes) {
       const attrs = state.attributes;
@@ -361,7 +363,7 @@ class PIDControllerPopup extends LitElement {
         const savedTime = this._savedFields.get("enabled");
         if (!savedTime || (now - savedTime > SAVE_TIMEOUT)) {
           if (!savedTime || attrs.enabled === this._data.enabled) {
-            data.enabled = attrs.enabled ?? false;
+      data.enabled = attrs.enabled ?? false;
             this._savedFields.delete("enabled");
           }
         }
@@ -373,7 +375,7 @@ class PIDControllerPopup extends LitElement {
         const savedTime = this._savedFields.get("runtime_mode");
         if (!savedTime || (now - savedTime > SAVE_TIMEOUT)) {
           if (!savedTime || attrs.runtime_mode === this._data.runtime_mode) {
-            data.runtime_mode = attrs.runtime_mode || "AUTO_SP";
+      data.runtime_mode = attrs.runtime_mode || "AUTO_SP";
             this._savedFields.delete("runtime_mode");
           }
         }
@@ -655,13 +657,13 @@ class PIDControllerPopup extends LitElement {
               entity_id: entityId,
               value: patch[key],
             });
-            // Update _data immediately with saved value
+            // Update _data immediately with saved value - this is the source of truth
             this._data[key] = patch[key];
-            // Mark as saved with timestamp - this prevents overwriting for 5 seconds
+            // Mark as saved with timestamp - this prevents overwriting for 10 seconds
             this._savedFields.set(key, now);
             // Remove from _edited since it's now saved
             delete this._edited[key];
-            console.log(`Saved ${key} = ${patch[key]} to ${entityId}, marked as saved`);
+            console.log(`Saved ${key} = ${patch[key]} to ${entityId}, marked as saved at ${now}, will protect for 10 seconds`);
             
             // If this is manual_sp, the effective_sp will update after coordinator refresh
             // Force an immediate read-only values update after a short delay to catch the update

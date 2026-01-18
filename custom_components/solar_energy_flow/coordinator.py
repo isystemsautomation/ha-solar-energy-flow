@@ -826,8 +826,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         error_raw: float | None = None
         if pv_for_pid_raw is not None and sp_for_pid_raw is not None:
             error_raw = sp_for_pid_raw - pv_for_pid_raw
-                if options.pid_mode == PID_MODE_REVERSE:
-                    error_raw = -error_raw
+            if options.pid_mode == PID_MODE_REVERSE:
+                error_raw = -error_raw
 
         if not options.enabled:
             self.pid.reset()

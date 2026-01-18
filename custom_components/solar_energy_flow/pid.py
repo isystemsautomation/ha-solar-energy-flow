@@ -28,7 +28,13 @@ class PIDStepResult:
 
 
 class PID:
-    """Simple PID with anti-windup via tracking and derivative on measurement."""
+    """Simple PID with anti-windup via tracking and derivative on measurement.
+    
+    Features:
+    - Conditional integration: integral only accumulates when output is not saturated or rate-limited
+    - Anti-windup: prevents integral buildup when output can't respond
+    - Derivative on measurement: reduces derivative kick on setpoint changes
+    """
 
     def __init__(self, cfg: PIDConfig, *, entry_id: str | None = None) -> None:
         self.cfg = cfg
@@ -95,7 +101,18 @@ class PID:
             u_out = u_sat
 
         if dt > 0:
-            self._integral += self.cfg.ki * error * dt + self._kaw * (u_out - u_pid) * dt
+            # Conditional integration: only accumulate integral when output is not saturated
+            # This prevents integral windup when the output is at its limits
+            output_saturated = (u_pid < self.cfg.min_output) or (u_pid > self.cfg.max_output)
+            rate_limited = rate_limiter_enabled and rate_limit > 0 and last_output is not None and u_out != u_sat
+            
+            if not output_saturated and not rate_limited:
+                # Output is within limits and not rate-limited: normal integral accumulation with anti-windup
+                self._integral += self.cfg.ki * error * dt + self._kaw * (u_out - u_pid) * dt
+            else:
+                # Output is saturated or rate-limited: only apply anti-windup, don't accumulate error
+                # This prevents the integral from growing when the output can't respond
+                self._integral += self._kaw * (u_out - u_pid) * dt
 
         self._prev_pv = pv
         self._prev_t = now

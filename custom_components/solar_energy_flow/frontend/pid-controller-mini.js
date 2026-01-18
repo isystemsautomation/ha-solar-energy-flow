@@ -102,9 +102,10 @@ class PIDControllerMini extends LitElement {
       padding: 0;
     }
 
-    .graph-container hui-history-graph-card {
+    .graph-container canvas {
       display: block;
       width: 100%;
+      max-width: 100%;
     }
   `;
 
@@ -163,6 +164,20 @@ class PIDControllerMini extends LitElement {
   firstUpdated() {
     // Create graph after first render
     setTimeout(() => this._updateGraph(), 200);
+    
+    // Refresh graph every 30 seconds
+    this._graphInterval = setInterval(() => {
+      this._updateGraph();
+    }, 30000);
+  }
+
+  disconnectedCallback() {
+    if (this._graphInterval) {
+      clearInterval(this._graphInterval);
+    }
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+    }
   }
 
   async _updateGraph() {
@@ -177,7 +192,6 @@ class PIDControllerMini extends LitElement {
     const outputExists = this.hass.states[entityIds.output];
     
     if (!pvExists || !spExists || !outputExists) {
-      console.warn("PID Mini: Some entities not found", { pv: pvExists, sp: spExists, output: outputExists });
       return;
     }
 
@@ -186,49 +200,213 @@ class PIDControllerMini extends LitElement {
       return;
     }
 
-    // Don't recreate if already exists
-    const existingCard = container.querySelector("hui-history-graph-card");
-    if (existingCard) {
-      if (existingCard.hass !== this.hass) {
-        existingCard.hass = this.hass;
-      }
-      return;
-    }
+    // Always fetch fresh data and redraw
+    const existingCanvas = container.querySelector("canvas");
 
     // Clear existing graph
     container.innerHTML = "";
 
-    // Try to load card helpers
-    try {
-      const helpers = await window.loadCardHelpers();
-      
-      const cardConfig = {
-        type: "history-graph",
-        entities: [
-          entityIds.pv,
-          entityIds.sp,
-          entityIds.output
-        ],
-        hours_to_show: 1,
-        refresh_interval: 30,
-      };
+    // Create canvas for line chart
+    const canvas = document.createElement("canvas");
+    const containerWidth = container.offsetWidth || 400;
+    canvas.width = containerWidth;
+    canvas.height = 200;
+    canvas.style.width = "100%";
+    canvas.style.height = "200px";
+    canvas.style.display = "block";
+    container.appendChild(canvas);
 
-      const card = helpers.createCardElement(cardConfig);
-      card.hass = this.hass;
-      container.appendChild(card);
+    // Fetch history data
+    try {
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - 3600000); // 1 hour ago
       
-      // Force update after a short delay to ensure rendering
-      setTimeout(() => {
-        if (card.updateComplete) {
-          card.updateComplete.then(() => {
-            card.requestUpdate();
-          });
+      // Use correct Home Assistant history API format
+      const history = await this.hass.callApi("GET", `history/period/${startTime.toISOString()}`, {
+        filter_entity_id: `${entityIds.pv},${entityIds.sp},${entityIds.output}`,
+        minimal_response: false,
+        significant_changes_only: false,
+      });
+
+      this._graphData = history;
+      this._drawChart(canvas, history, entityIds);
+      
+      // Redraw on resize
+      const resizeObserver = new ResizeObserver(() => {
+        if (canvas.parentElement) {
+          const newWidth = canvas.parentElement.offsetWidth;
+          if (newWidth !== canvas.width) {
+            canvas.width = newWidth;
+            this._drawChart(canvas, history, entityIds);
+          }
         }
-      }, 100);
+      });
+      resizeObserver.observe(container);
+      this._resizeObserver = resizeObserver;
     } catch (err) {
-      console.error("PID Mini: Failed to create history graph:", err);
+      console.error("PID Mini: Failed to fetch history:", err);
       container.innerHTML = `<div style='padding: 8px; color: var(--error-color, red); font-size: 12px;'>Graph error: ${err.message || err}</div>`;
     }
+  }
+
+  _drawChart(canvas, history, entityIds) {
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    const padding = 40;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    if (!history || history.length === 0) {
+      ctx.fillStyle = "var(--secondary-text-color, #888)";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("No data available", width / 2, height / 2);
+      return;
+    }
+
+    // Parse history data
+    const data = {
+      pv: [],
+      sp: [],
+      output: []
+    };
+
+    const allTimes = new Set();
+    
+    // History API returns array of entity histories
+    if (Array.isArray(history)) {
+      history.forEach((entityHistory) => {
+        if (!Array.isArray(entityHistory) || entityHistory.length === 0) return;
+        
+        // First state has entity_id
+        const firstState = entityHistory[0];
+        if (!firstState || !firstState.entity_id) return;
+        
+        const entityId = firstState.entity_id;
+        
+        entityHistory.forEach((state) => {
+          if (!state) return;
+          
+          const time = new Date(state.last_changed || state.last_updated);
+          if (isNaN(time.getTime())) return;
+          
+          allTimes.add(time.getTime());
+          
+          const value = parseFloat(state.state);
+          if (isNaN(value)) return;
+          
+          if (entityId === entityIds.pv) {
+            data.pv.push({ time: time.getTime(), value });
+          } else if (entityId === entityIds.sp) {
+            data.sp.push({ time: time.getTime(), value });
+          } else if (entityId === entityIds.output) {
+            data.output.push({ time: time.getTime(), value });
+          }
+        });
+      });
+    }
+
+    if (allTimes.size === 0) {
+      ctx.fillStyle = "var(--secondary-text-color, #888)";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("No data available", width / 2, height / 2);
+      return;
+    }
+
+    // Sort times
+    const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
+    const timeRange = sortedTimes[sortedTimes.length - 1] - sortedTimes[0];
+    if (timeRange === 0) return;
+
+    // Find value ranges
+    const allValues = [...data.pv, ...data.sp, ...data.output].map(d => d.value);
+    const minValue = Math.min(...allValues);
+    const maxValue = Math.max(...allValues);
+    const valueRange = maxValue - minValue || 1;
+
+    // Draw axes
+    ctx.strokeStyle = "var(--divider-color, #ddd)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding, padding);
+    ctx.lineTo(padding, height - padding);
+    ctx.lineTo(width - padding, height - padding);
+    ctx.stroke();
+
+    // Draw grid lines
+    ctx.strokeStyle = "var(--divider-color, #ddd)";
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+      const y = padding + (height - 2 * padding) * (1 - i / 5);
+      ctx.beginPath();
+      ctx.moveTo(padding, y);
+      ctx.lineTo(width - padding, y);
+      ctx.stroke();
+    }
+
+    // Draw time labels
+    ctx.fillStyle = "var(--secondary-text-color, #888)";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "center";
+    for (let i = 0; i <= 4; i++) {
+      const timeIndex = Math.floor((sortedTimes.length - 1) * i / 4);
+      const time = new Date(sortedTimes[timeIndex]);
+      const x = padding + (width - 2 * padding) * (i / 4);
+      const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      ctx.fillText(timeStr, x, height - padding + 20);
+    }
+
+    // Draw value labels
+    ctx.textAlign = "right";
+    for (let i = 0; i <= 5; i++) {
+      const value = minValue + valueRange * (1 - i / 5);
+      const y = padding + (height - 2 * padding) * (i / 5);
+      ctx.fillText(value.toFixed(0), padding - 5, y + 4);
+    }
+
+    // Draw lines
+    const colors = {
+      pv: "#2196F3",      // Blue
+      sp: "#FF9800",      // Orange
+      output: "#9C27B0"   // Purple
+    };
+
+    Object.keys(data).forEach((key) => {
+      if (data[key].length === 0) return;
+
+      ctx.strokeStyle = colors[key];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      data[key].forEach((point, index) => {
+        const x = padding + (width - 2 * padding) * ((point.time - sortedTimes[0]) / timeRange);
+        const y = padding + (height - 2 * padding) * (1 - (point.value - minValue) / valueRange);
+
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
+    });
+
+    // Draw legend
+    const legendY = padding + 10;
+    let legendX = width - padding - 100;
+    Object.keys(colors).forEach((key) => {
+      ctx.fillStyle = colors[key];
+      ctx.fillRect(legendX, legendY, 12, 2);
+      ctx.fillStyle = "var(--primary-text-color, #000)";
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(key.toUpperCase(), legendX + 15, legendY + 8);
+      legendX -= 60;
+    });
   }
 
   _updateData() {

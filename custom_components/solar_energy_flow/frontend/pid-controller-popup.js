@@ -123,6 +123,7 @@ class PIDControllerPopup extends LitElement {
     super();
     this._data = {};
     this._edited = {};
+    this._editingFields = new Set(); // Track which fields are currently being edited
   }
 
   setConfig(config) {
@@ -138,7 +139,14 @@ class PIDControllerPopup extends LitElement {
 
   updated(changedProperties) {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
-      this._updateData();
+      // Only update if we're not currently editing (no active edits)
+      // This prevents overwriting user input while they're typing
+      if (!this._hasEdits()) {
+        this._updateData();
+      } else {
+        // Still update read-only sensor values, but preserve edited values
+        this._updateData();
+      }
     }
   }
 
@@ -150,16 +158,32 @@ class PIDControllerPopup extends LitElement {
 
     if (state && state.attributes) {
       const attrs = state.attributes;
-      data.enabled = attrs.enabled ?? false;
-      data.runtime_mode = attrs.runtime_mode || "AUTO_SP";
-      data.manual_out = attrs.manual_out ?? null;
-      data.manual_sp = attrs.manual_sp ?? null;
-      data.deadband = attrs.deadband ?? null;
-      data.kp = attrs.kp ?? null;
-      data.ki = attrs.ki ?? null;
-      data.kd = attrs.kd ?? null;
-      data.max_output = attrs.max_output ?? null;
-      data.min_output = attrs.min_output ?? null;
+      // Only update fields that aren't currently being edited
+      if (this._edited.enabled === undefined) {
+        data.enabled = attrs.enabled ?? false;
+      } else {
+        data.enabled = this._data.enabled ?? attrs.enabled ?? false;
+      }
+      
+      if (this._edited.runtime_mode === undefined) {
+        data.runtime_mode = attrs.runtime_mode || "AUTO_SP";
+      } else {
+        data.runtime_mode = this._data.runtime_mode ?? attrs.runtime_mode || "AUTO_SP";
+      }
+      
+      // For number fields, preserve edited values
+      const numberFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output'];
+      for (const field of numberFields) {
+        if (this._editingFields.has(field) || this._edited[field] !== undefined) {
+          // Keep the edited value - don't overwrite it while user is typing
+          data[field] = this._edited[field] ?? this._data[field] ?? attrs[field] ?? null;
+        } else {
+          // Update from entity state
+          data[field] = attrs[field] ?? null;
+        }
+      }
+      
+      // Always update read-only sensor values
       data.runtime_modes = attrs.runtime_modes || [
         "AUTO_SP",
         "MANUAL_SP",
@@ -180,10 +204,7 @@ class PIDControllerPopup extends LitElement {
     }
 
     this._data = data;
-    // Reset edited when data updates
-    if (!this._hasEdits()) {
-      this._edited = {};
-    }
+    this.requestUpdate();
   }
 
   _hasEdits() {
@@ -191,7 +212,11 @@ class PIDControllerPopup extends LitElement {
   }
 
   _getValue(key) {
-    return this._edited[key] !== undefined ? this._edited[key] : this._data[key];
+    // Always prioritize edited value - this prevents overwriting user input
+    if (this._edited[key] !== undefined) {
+      return this._edited[key];
+    }
+    return this._data[key];
   }
 
   _onEnableChanged(ev) {
@@ -215,17 +240,25 @@ class PIDControllerPopup extends LitElement {
     const value = parseFloat(ev.target.value);
     if (!isNaN(value)) {
       this._edited[key] = value;
+      this._editingFields.add(key); // Mark as being edited
+      // Also update _data immediately so it persists during updates
+      if (!this._data) this._data = {};
+      this._data[key] = value;
     } else {
       delete this._edited[key];
+      this._editingFields.delete(key);
     }
-    this.requestUpdate();
+    // Don't call requestUpdate here - let the input field handle its own state
   }
 
   _onNumberBlur(key, ev) {
+    // Mark field as no longer being edited
+    this._editingFields.delete(key);
     // Save on blur (when user leaves the field)
     if (this._edited[key] !== undefined) {
       this._save();
     }
+    this.requestUpdate();
   }
 
   _formatValue(value) {

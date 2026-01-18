@@ -311,6 +311,15 @@ async def _set_output(hass: HomeAssistant, entity_id: str, value: float) -> bool
         _LOGGER.warning("Unsupported output entity domain '%s' for %s. Use number.* or input_number.*", domain, entity_id)
         return False
 
+    # Get entity state to check for min/max limits
+    state = hass.states.get(entity_id)
+    if state and hasattr(state, "attributes"):
+        entity_min = state.attributes.get("min", None)
+        entity_max = state.attributes.get("max", None)
+        if entity_min is not None and entity_max is not None:
+            # Clamp value to entity's actual range before writing
+            value = max(float(entity_min), min(float(entity_max), value))
+
     try:
         await hass.services.async_call(domain, "set_value", {"entity_id": entity_id, "value": value}, blocking=True)
     except (HomeAssistantError, asyncio.TimeoutError, ValueError) as err:

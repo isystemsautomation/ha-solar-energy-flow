@@ -479,7 +479,12 @@ class PIDControllerPopup extends LitElement {
       hasChanges = true;
     }
     if (compareValue(this._data.effective_sp, newValues.effective_sp)) {
-      console.debug("PID Popup: SP changed", this._data.effective_sp, "->", newValues.effective_sp);
+      console.log("PID Popup: SP changed", this._data.effective_sp, "->", newValues.effective_sp);
+      this._data.effective_sp = newValues.effective_sp;
+      hasChanges = true;
+    } else if (this._data.effective_sp !== newValues.effective_sp && newValues.effective_sp !== null) {
+      // Force update even if compareValue didn't detect change (might be precision issue)
+      console.log("PID Popup: SP force update", this._data.effective_sp, "->", newValues.effective_sp);
       this._data.effective_sp = newValues.effective_sp;
       hasChanges = true;
     }
@@ -657,6 +662,18 @@ class PIDControllerPopup extends LitElement {
             // Remove from _edited since it's now saved
             delete this._edited[key];
             console.log(`Saved ${key} = ${patch[key]} to ${entityId}, marked as saved`);
+            
+            // If this is manual_sp, the effective_sp will update after coordinator refresh
+            // Force an immediate read-only values update after a short delay to catch the update
+            if (key === "manual_sp") {
+              setTimeout(() => {
+                this._updateReadOnlyValues();
+              }, 500);
+              // Also schedule another update after coordinator typically refreshes (usually 1-2 seconds)
+              setTimeout(() => {
+                this._updateReadOnlyValues();
+              }, 2000);
+            }
           } catch (err) {
             console.error(`Error saving ${key} to ${entityId}:`, err);
             alert(`Error saving ${key}: ${err.message || err}`);

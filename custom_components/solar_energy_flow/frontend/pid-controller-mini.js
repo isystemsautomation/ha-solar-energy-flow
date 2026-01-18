@@ -106,19 +106,19 @@ class PIDControllerMini extends LitElement {
       schema: [
         {
           name: "pid_entity",
+          required: true,
           selector: {
             entity: {
               domain: "sensor",
             },
           },
-          required: true,
         },
         {
           name: "title",
+          default: "PID Controller",
           selector: {
             text: {},
           },
-          default: "PID Controller",
         },
       ],
     };

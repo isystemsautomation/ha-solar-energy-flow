@@ -89,6 +89,17 @@ class PIDControllerMini extends LitElement {
     .status-badge.disabled {
       background-color: var(--disabled-color, #9e9e9e);
     }
+
+    .graph-container {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--divider-color);
+    }
+
+    .graph-container ha-card {
+      box-shadow: none;
+      padding: 0;
+    }
   `;
 
   constructor() {
@@ -136,6 +147,43 @@ class PIDControllerMini extends LitElement {
   updated(changedProperties) {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
       this._updateData();
+      this._updateGraph();
+    }
+    if (changedProperties.has("hass")) {
+      this._updateGraph();
+    }
+  }
+
+  _updateGraph() {
+    const entityIds = this._getEntityIds();
+    if (!entityIds || !this.hass) return;
+
+    const container = this.shadowRoot?.getElementById("graph-container");
+    if (!container) return;
+
+    // Clear existing graph
+    container.innerHTML = "";
+
+    // Create history graph card using Home Assistant's card creator
+    if (window.loadCardHelpers) {
+      window.loadCardHelpers().then((helpers) => {
+        const cardConfig = {
+          type: "history-graph",
+          entities: [entityIds.pv, entityIds.sp, entityIds.output],
+          hours_to_show: 1,
+          refresh_interval: 60,
+        };
+
+        const card = helpers.createCardElement(cardConfig);
+        card.hass = this.hass;
+        container.appendChild(card);
+      }).catch(() => {
+        // Fallback: create simple text if card helper fails
+        container.innerHTML = "<div style='padding: 8px; color: var(--secondary-text-color); font-size: 12px;'>Graph unavailable</div>";
+      });
+    } else {
+      // Fallback if loadCardHelpers is not available
+      container.innerHTML = "<div style='padding: 8px; color: var(--secondary-text-color); font-size: 12px;'>Graph unavailable</div>";
     }
   }
 
@@ -170,6 +218,19 @@ class PIDControllerMini extends LitElement {
   _formatMode(mode) {
     if (!mode) return "—";
     return mode.replace(/_/g, " ");
+  }
+
+  _getEntityIds() {
+    if (!this.config || !this.config.pid_entity) return null;
+    
+    const statusEntity = this.config.pid_entity;
+    const deviceName = statusEntity.replace(/^sensor\./, "").replace(/_status$/, "");
+    
+    return {
+      pv: `sensor.${deviceName}_pv_value`,
+      sp: `sensor.${deviceName}_effective_sp`,
+      output: `sensor.${deviceName}_output`,
+    };
   }
 
   _openPopup(ev) {
@@ -288,6 +349,10 @@ class PIDControllerMini extends LitElement {
             <div class="metric-value">${this._formatValue(d.output)}</div>
           </div>
         </div>
+
+        ${this._getEntityIds() ? html`
+          <div class="graph-container" id="graph-container"></div>
+        ` : ""}
 
         <div class="actions">
           <mwc-button outlined label="Open Editor" @click=${this._openPopup}></mwc-button>

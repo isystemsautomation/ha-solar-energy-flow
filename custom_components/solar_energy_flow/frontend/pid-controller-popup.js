@@ -109,6 +109,19 @@ class PIDControllerPopup extends LitElement {
       --mdc-theme-primary: var(--primary-color);
     }
 
+    .graph-container {
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--divider-color);
+      min-height: 200px;
+    }
+
+    .graph-container canvas {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+    }
+
   `;
 
   constructor() {
@@ -120,12 +133,16 @@ class PIDControllerPopup extends LitElement {
     this._updateInterval = null;
     this._lastFullUpdate = 0;
     this._stateChangedUnsub = null;
+    this._graphInterval = null;
+    this._resizeObserver = null;
   }
 
   connectedCallback() {
     super.connectedCallback();
     this._startLiveUpdates();
     this._subscribeToStateChanges();
+    setTimeout(() => this._updateGraph(), 300);
+    this._graphInterval = setInterval(() => this._updateGraph(), 30000);
   }
 
   disconnectedCallback() {
@@ -137,6 +154,14 @@ class PIDControllerPopup extends LitElement {
     if (this._stateChangedUnsub) {
       this._stateChangedUnsub();
       this._stateChangedUnsub = null;
+    }
+    if (this._graphInterval) {
+      clearInterval(this._graphInterval);
+      this._graphInterval = null;
+    }
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = null;
     }
   }
 
@@ -289,6 +314,7 @@ class PIDControllerPopup extends LitElement {
     if (changedProperties.has("hass") && this._editingFields.size === 0) {
       this._updateReadOnlyValues();
       this._checkEntityStateChanges();
+      setTimeout(() => this._updateGraph(), 100);
     }
   }
 
@@ -654,6 +680,218 @@ class PIDControllerPopup extends LitElement {
     }
   }
 
+  _getEntityIds() {
+    if (!this.config || !this.config.pid_entity) return null;
+    
+    const statusEntity = this.config.pid_entity;
+    const deviceName = statusEntity.replace(/^sensor\./, "").replace(/_status$/, "");
+    
+    return {
+      pv: `sensor.${deviceName}_pv_value`,
+      sp: `sensor.${deviceName}_effective_sp`,
+      output: `sensor.${deviceName}_output`,
+    };
+  }
+
+  async _updateGraph() {
+    const entityIds = this._getEntityIds();
+    if (!entityIds || !this.hass) {
+      return;
+    }
+
+    const pvExists = this.hass.states[entityIds.pv];
+    const spExists = this.hass.states[entityIds.sp];
+    const outputExists = this.hass.states[entityIds.output];
+    
+    if (!pvExists || !spExists || !outputExists) {
+      return;
+    }
+
+    const container = this.shadowRoot?.getElementById("popup-graph-container");
+    if (!container) {
+      return;
+    }
+
+    container.innerHTML = "";
+
+    const canvas = document.createElement("canvas");
+    const containerWidth = container.offsetWidth || 400;
+    canvas.width = containerWidth;
+    canvas.height = 200;
+    canvas.style.width = "100%";
+    canvas.style.height = "200px";
+    canvas.style.display = "block";
+    container.appendChild(canvas);
+
+    try {
+      const startTime = new Date(Date.now() - 3600000);
+      const entityList = `${entityIds.pv},${entityIds.sp},${entityIds.output}`;
+      const url = `history/period/${startTime.toISOString()}?filter_entity_id=${encodeURIComponent(entityList)}&minimal_response=false&significant_changes_only=false`;
+      
+      const history = await this.hass.callApi("GET", url);
+
+      if (!history || !Array.isArray(history)) {
+        throw new Error("Invalid history data format");
+      }
+
+      this._drawChart(canvas, history, entityIds);
+      
+      const resizeObserver = new ResizeObserver(() => {
+        if (canvas.parentElement) {
+          const newWidth = canvas.parentElement.offsetWidth;
+          if (newWidth !== canvas.width) {
+            canvas.width = newWidth;
+            this._drawChart(canvas, history, entityIds);
+          }
+        }
+      });
+      resizeObserver.observe(container);
+      this._resizeObserver = resizeObserver;
+    } catch (err) {
+      const errorMsg = err?.message || (typeof err === 'string' ? err : JSON.stringify(err));
+      container.innerHTML = `<div style='padding: 8px; color: var(--error-color, red); font-size: 12px;'>Graph error: ${errorMsg}</div>`;
+    }
+  }
+
+  _drawChart(canvas, history, entityIds) {
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    const padding = 40;
+
+    ctx.clearRect(0, 0, width, height);
+
+    if (!history || history.length === 0) {
+      ctx.fillStyle = "var(--secondary-text-color, #888)";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("No data available", width / 2, height / 2);
+      return;
+    }
+
+    const data = { pv: [], sp: [], output: [] };
+    const allTimes = new Set();
+    
+    if (Array.isArray(history)) {
+      history.forEach((entityHistory) => {
+        if (!Array.isArray(entityHistory) || entityHistory.length === 0) return;
+        
+        const firstState = entityHistory[0];
+        if (!firstState?.entity_id) return;
+        
+        const entityId = firstState.entity_id;
+        
+        entityHistory.forEach((state) => {
+          if (!state) return;
+          
+          const time = new Date(state.last_changed || state.last_updated);
+          if (isNaN(time.getTime())) return;
+          
+          allTimes.add(time.getTime());
+          
+          const value = parseFloat(state.state);
+          if (isNaN(value)) return;
+          
+          if (entityId === entityIds.pv) {
+            data.pv.push({ time: time.getTime(), value });
+          } else if (entityId === entityIds.sp) {
+            data.sp.push({ time: time.getTime(), value });
+          } else if (entityId === entityIds.output) {
+            data.output.push({ time: time.getTime(), value });
+          }
+        });
+      });
+    }
+
+    if (allTimes.size === 0) {
+      ctx.fillStyle = "var(--secondary-text-color, #888)";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("No data available", width / 2, height / 2);
+      return;
+    }
+
+    const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
+    const timeRange = sortedTimes[sortedTimes.length - 1] - sortedTimes[0];
+    if (timeRange === 0) return;
+
+    const allValues = [...data.pv, ...data.sp, ...data.output].map(d => d.value);
+    const minValue = Math.min(...allValues);
+    const maxValue = Math.max(...allValues);
+    const valueRange = maxValue - minValue || 1;
+
+    ctx.strokeStyle = "var(--divider-color, #ddd)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding, padding);
+    ctx.lineTo(padding, height - padding);
+    ctx.lineTo(width - padding, height - padding);
+    ctx.stroke();
+
+    ctx.strokeStyle = "var(--divider-color, #ddd)";
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+      const y = padding + (height - 2 * padding) * (1 - i / 5);
+      ctx.beginPath();
+      ctx.moveTo(padding, y);
+      ctx.lineTo(width - padding, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "var(--secondary-text-color, #888)";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "center";
+    for (let i = 0; i <= 4; i++) {
+      const timeIndex = Math.floor((sortedTimes.length - 1) * i / 4);
+      const time = new Date(sortedTimes[timeIndex]);
+      const x = padding + (width - 2 * padding) * (i / 4);
+      const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      ctx.fillText(timeStr, x, height - padding + 20);
+    }
+
+    ctx.textAlign = "right";
+    for (let i = 0; i <= 5; i++) {
+      const value = minValue + valueRange * (1 - i / 5);
+      const y = padding + (height - 2 * padding) * (i / 5);
+      ctx.fillText(value.toFixed(0), padding - 5, y + 4);
+    }
+
+    const colors = { pv: "#2196F3", sp: "#FF9800", output: "#9C27B0" };
+
+    Object.keys(colors).forEach((key) => {
+      if (data[key].length === 0) return;
+
+      ctx.strokeStyle = colors[key];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      data[key].forEach((point, index) => {
+        const x = padding + (width - 2 * padding) * ((point.time - sortedTimes[0]) / timeRange);
+        const y = padding + (height - 2 * padding) * (1 - (point.value - minValue) / valueRange);
+
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
+    });
+
+    const legendY = padding + 10;
+    let legendX = width - padding - 100;
+    Object.keys(colors).forEach((key) => {
+      ctx.fillStyle = colors[key];
+      ctx.fillRect(legendX, legendY, 12, 2);
+      ctx.fillStyle = "var(--primary-text-color, #000)";
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(key.toUpperCase(), legendX + 15, legendY + 8);
+      legendX -= 60;
+    });
+  }
+
   render() {
     if (!this.hass || !this.config) {
       return html``;
@@ -676,6 +914,8 @@ class PIDControllerPopup extends LitElement {
         <div class="header">
           <div class="title">PID Controller Editor</div>
         </div>
+
+        <div class="graph-container" id="popup-graph-container"></div>
 
         <div class="section">
           <div class="section-title">Control</div>

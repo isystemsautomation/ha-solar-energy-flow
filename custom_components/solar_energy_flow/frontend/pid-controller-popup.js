@@ -244,7 +244,7 @@ class PIDControllerPopup extends LitElement {
       if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
         let entityValue = attrs[field];
         if (field === 'enabled' || field === 'grid_limiter_enabled' || field === 'rate_limiter_enabled') {
-          const switchEntityId = this._findEntityId("switch", field === 'enabled' ? "enabled" : field === 'grid_limiter_enabled' ? "grid_limiter" : "rate_limiter");
+          const switchEntityId = this._findEntityId("switch", field === 'enabled' ? "enabled" : field === 'grid_limiter_enabled' ? "grid_limiter_enabled" : "rate_limiter");
           const switchEntityState = this.hass?.states[switchEntityId];
           entityValue = switchEntityState?.state === "on";
         } else if (field === 'runtime_mode') {
@@ -284,7 +284,7 @@ class PIDControllerPopup extends LitElement {
       
       let entityValue = attrs[field];
       if (field === 'enabled' || field === 'grid_limiter_enabled' || field === 'rate_limiter_enabled') {
-        const switchEntityId = this._findEntityId("switch", field === 'enabled' ? "enabled" : field === 'grid_limiter_enabled' ? "grid_limiter" : "rate_limiter");
+        const switchEntityId = this._findEntityId("switch", field === 'enabled' ? "enabled" : field === 'grid_limiter_enabled' ? "grid_limiter_enabled" : "rate_limiter");
         const switchEntityState = this.hass?.states[switchEntityId];
         entityValue = switchEntityState?.state === "on";
       } else if (field === 'runtime_mode') {
@@ -402,7 +402,7 @@ class PIDControllerPopup extends LitElement {
       if (this._edited.grid_limiter_enabled === undefined) {
         const savedTime = this._savedFields.get("grid_limiter_enabled");
         if (!savedTime || (now - savedTime > SAVE_TIMEOUT)) {
-          const switchEntityId = this._findEntityId("switch", "grid_limiter");
+          const switchEntityId = this._findEntityId("switch", "grid_limiter_enabled");
           const switchEntityState = this.hass?.states[switchEntityId];
           const entityValue = switchEntityState?.state === "on";
           if (!savedTime || entityValue === this._data.grid_limiter_enabled) {
@@ -681,9 +681,15 @@ class PIDControllerPopup extends LitElement {
     }
     
     const prefix = `${domain}.${deviceName}`;
+    const possibleEndings = [`_${entityName}`, `_${suffix}`, `_${suffix.replace(/_enabled$/, "")}`, `_${suffix.replace(/_enabled$/, "_enabled")}`];
+    
     for (const entityId in this.hass.states) {
-      if (entityId.startsWith(prefix) && (entityId.endsWith(`_${entityName}`) || entityId.endsWith(`_${suffix}`))) {
-        return entityId;
+      if (entityId.startsWith(prefix)) {
+        for (const ending of possibleEndings) {
+          if (entityId.endsWith(ending)) {
+            return entityId;
+          }
+        }
       }
     }
     
@@ -732,7 +738,11 @@ class PIDControllerPopup extends LitElement {
       }
       
       if (patch.grid_limiter_enabled !== undefined) {
-        const entityId = this._findEntityId("switch", "grid_limiter");
+        const entityId = this._findEntityId("switch", "grid_limiter_enabled");
+        if (!entityId || !this.hass.states[entityId]) {
+          alert(`Grid limiter switch entity not found: ${entityId || "unknown"}`);
+          throw new Error(`Grid limiter switch entity not found`);
+        }
         await this.hass.callService("switch", patch.grid_limiter_enabled ? "turn_on" : "turn_off", {
           entity_id: entityId,
         });

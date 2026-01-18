@@ -691,17 +691,15 @@ class PIDControllerPopup extends LitElement {
     this.requestUpdate();
   }
 
-  _close() {
+  _close(ev) {
+    if (ev) {
+      ev.stopPropagation();
+      ev.preventDefault();
+    }
+    
     const dialog = this.closest("ha-dialog");
     if (dialog) {
       dialog.close();
-    }
-    if (this.hass?.callService) {
-      try {
-        this.hass.callService("browser_mod", "close_popup", {});
-      } catch (e) {
-        // Ignore browser_mod errors
-      }
     }
   }
 

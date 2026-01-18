@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
-from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTime
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -43,50 +40,12 @@ from .const import (
     RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
-    HUB_DEVICE_SUFFIX,
-    PID_DEVICE_SUFFIX,
-    DIVIDER_DEVICE_SUFFIX,
-    CONF_CONSUMERS,
-    CONF_DIVIDER_ENABLED,
-    CONSUMER_TYPE,
-    CONSUMER_TYPE_CONTROLLED,
-    CONSUMER_TYPE_BINARY,
-    CONSUMER_DEVICE_SUFFIX,
-    CONSUMER_ID,
-    CONSUMER_NAME,
-    DEFAULT_DIVIDER_ENABLED,
-    CONSUMER_DEFAULT_START_DELAY_S,
-    CONSUMER_DEFAULT_STOP_DELAY_S,
-    CONSUMER_MIN_POWER_W,
-    CONSUMER_MAX_POWER_W,
-    CONSUMER_POWER_TARGET_ENTITY_ID,
-    CONSUMER_STEP_W,
-    CONSUMER_PID_DEADBAND_PCT,
-    CONSUMER_DEFAULT_STEP_W,
-    CONSUMER_MIN_STEP_W,
-    CONSUMER_MAX_STEP_W,
-    CONSUMER_DEFAULT_PID_DEADBAND_PCT,
-    CONSUMER_MIN_PID_DEADBAND_PCT,
-    CONSUMER_MAX_PID_DEADBAND_PCT,
-    CONSUMER_DEFAULT_THRESHOLD_W,
-    CONSUMER_THRESHOLD_W,
-    CONSUMER_MIN_THRESHOLD_W,
-    CONSUMER_MAX_THRESHOLD_W,
 )
-from .consumer_bindings import ConsumerBinding, get_consumer_binding
 from .coordinator import SolarEnergyFlowCoordinator
-from .helpers import (
-    RUNTIME_FIELD_CMD_W,
-    RUNTIME_FIELD_START_TIMER_S,
-    RUNTIME_FIELD_STOP_TIMER_S,
-    async_dispatch_consumer_runtime_update,
-    get_consumer_runtime,
-    get_entry_coordinator,
-)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
+    coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities: list[NumberEntity] = [
         SolarEnergyFlowNumber(
@@ -211,20 +170,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         ),
     ]
 
-    # Only create consumer number entities if divider is enabled
-    divider_enabled = entry.options.get(CONF_DIVIDER_ENABLED, DEFAULT_DIVIDER_ENABLED)
-    if divider_enabled:
-        consumers = entry.options.get(CONF_CONSUMERS, [])
-        for consumer in consumers:
-            if consumer.get(CONSUMER_TYPE) == CONSUMER_TYPE_CONTROLLED:
-                entities.append(SolarEnergyFlowConsumerNumber(entry, consumer))
-                entities.append(SolarEnergyFlowConsumerStepNumber(entry, consumer))
-                entities.append(SolarEnergyFlowConsumerPidDeadbandNumber(entry, consumer))
-            else:
-                entities.append(SolarEnergyFlowBinaryConsumerThresholdNumber(entry, consumer))
-            entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, True))
-            entities.append(SolarEnergyFlowConsumerDelayNumber(entry, consumer, False))
-
     async_add_entities(entities)
 
 
@@ -257,8 +202,8 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
         self._attr_entity_category = entity_category
         self._attr_native_unit_of_measurement = native_unit
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_{PID_DEVICE_SUFFIX}")},
-            name=f"{entry.title} PID Controller",
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
             manufacturer="Solar Energy Flow",
             model="PID Controller",
         )
@@ -302,192 +247,6 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
         await self.coordinator.async_request_refresh()
 
 
-class SolarEnergyFlowConsumerNumber(RestoreNumber):
-    _attr_has_entity_name = True
-    _attr_name = "Power"
-    _attr_mode = NumberMode.BOX
-    _attr_native_unit_of_measurement = "W"
-    _attr_should_poll = False
-
-    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
-        self._entry = entry
-        self._consumer = consumer
-        self._consumer_id = consumer[CONSUMER_ID]
-        self._binding: ConsumerBinding | None = None
-        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{consumer[CONSUMER_ID]}_power"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
-            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
-            name=consumer.get(CONSUMER_NAME, "Consumer"),
-            manufacturer="Solar Energy Flow",
-            model="Energy Divider Consumer",
-        )
-        self._attr_native_min_value = float(consumer.get(CONSUMER_MIN_POWER_W, 0.0))
-        self._attr_native_max_value = float(consumer.get(CONSUMER_MAX_POWER_W, 0.0))
-        self._current_value: float = self._attr_native_min_value
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self._binding = get_consumer_binding(self.hass, self._entry.entry_id, self._consumer)
-        if self._binding is not None:
-            self._binding.set_desired_power(self._current_value)
-        last = await self.async_get_last_number_data()
-        if last is not None and last.native_value is not None:
-            self._current_value = round(float(last.native_value), 1)
-            if self._binding is not None:
-                self._binding.set_desired_power(self._current_value)
-        if self._binding is not None and self._consumer.get(CONSUMER_POWER_TARGET_ENTITY_ID):
-            await self._binding.async_push_power(self.hass)
-        self._update_consumer_runtime()
-
-    @property
-    def native_value(self) -> float | None:
-        return self._current_value
-
-    def _update_consumer_runtime(self) -> None:
-        if self.hass is None:
-            return
-        runtime = get_consumer_runtime(self.hass, self._entry.entry_id, self._consumer_id)
-        runtime[RUNTIME_FIELD_CMD_W] = round(float(self._current_value), 1)
-        runtime.setdefault(RUNTIME_FIELD_START_TIMER_S, 0.0)
-        runtime.setdefault(RUNTIME_FIELD_STOP_TIMER_S, 0.0)
-        async_dispatch_consumer_runtime_update(self.hass, self._entry.entry_id, self._consumer_id)
-
-    async def async_set_native_value(self, value: float) -> None:
-        self._current_value = round(float(value), 1)
-        if self._binding is None:
-            self._update_consumer_runtime()
-            self.async_write_ha_state()
-            return
-        self._binding.set_desired_power(self._current_value)
-        await self._binding.async_push_power(self.hass)
-        self._update_consumer_runtime()
-        self.async_write_ha_state()
-
-
-class _BaseConsumerConfigNumber(RestoreNumber):
-    _attr_has_entity_name = True
-    _attr_mode = NumberMode.BOX
-    _attr_should_poll = False
-    _attr_entity_category = EntityCategory.CONFIG
-
-    def __init__(
-        self,
-        entry: ConfigEntry,
-        consumer: dict[str, Any],
-        name: str,
-        unique_suffix: str,
-    ) -> None:
-        self._entry = entry
-        self._consumer = consumer
-        self._consumer_id = consumer[CONSUMER_ID]
-        self._attr_name = name
-        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{self._consumer_id}_{unique_suffix}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
-            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
-            name=consumer.get(CONSUMER_NAME, "Consumer"),
-            manufacturer="Solar Energy Flow",
-            model="Energy Divider Consumer",
-        )
-        self._current_value: float = 0.0
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_number_data()
-        if last is not None and last.native_value is not None:
-            self._current_value = round(float(last.native_value), 1)
-        self.async_write_ha_state()
-
-    @property
-    def native_value(self) -> float | None:
-        return self._current_value
-
-    async def async_set_native_value(self, value: float) -> None:
-        self._current_value = round(float(value), 1)
-        self.async_write_ha_state()
-
-
-class SolarEnergyFlowConsumerStepNumber(_BaseConsumerConfigNumber):
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_native_step = 10.0
-    _attr_native_min_value = CONSUMER_MIN_STEP_W
-    _attr_native_max_value = CONSUMER_MAX_STEP_W
-
-    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
-        super().__init__(entry, consumer, "Step (W)", "step_w")
-        self._current_value = round(float(consumer.get(CONSUMER_STEP_W, CONSUMER_DEFAULT_STEP_W)), 1)
-
-
-class SolarEnergyFlowConsumerPidDeadbandNumber(_BaseConsumerConfigNumber):
-    _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_native_step = 1.0
-    _attr_native_min_value = CONSUMER_MIN_PID_DEADBAND_PCT
-    _attr_native_max_value = CONSUMER_MAX_PID_DEADBAND_PCT
-
-    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
-        super().__init__(entry, consumer, "PID deadband (%)", "pid_deadband_pct")
-        self._current_value = round(float(
-            consumer.get(CONSUMER_PID_DEADBAND_PCT, CONSUMER_DEFAULT_PID_DEADBAND_PCT)
-        ), 1)
-
-
-class SolarEnergyFlowBinaryConsumerThresholdNumber(_BaseConsumerConfigNumber):
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_native_step = 10.0
-    _attr_native_min_value = CONSUMER_MIN_THRESHOLD_W
-    _attr_native_max_value = CONSUMER_MAX_THRESHOLD_W
-
-    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any]) -> None:
-        super().__init__(entry, consumer, "Threshold (W)", CONSUMER_THRESHOLD_W)
-        self._current_value = round(float(consumer.get(CONSUMER_THRESHOLD_W, CONSUMER_DEFAULT_THRESHOLD_W)), 1)
-
-
-class SolarEnergyFlowConsumerDelayNumber(RestoreNumber):
-    _attr_has_entity_name = True
-    _attr_mode = NumberMode.BOX
-    _attr_native_step = 10.0
-    _attr_native_min_value = 0.0
-    _attr_native_max_value = 3600.0
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_should_poll = False
-
-    def __init__(self, entry: ConfigEntry, consumer: dict[str, Any], is_start: bool) -> None:
-        self._entry = entry
-        self._consumer = consumer
-        self._is_start = is_start
-        self._consumer_id = consumer[CONSUMER_ID]
-        suffix = "start_delay_s" if is_start else "stop_delay_s"
-        name = "Start delay (s)" if is_start else "Stop delay (s)"
-        self._attr_name = name
-        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{self._consumer_id}_{suffix}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_{CONSUMER_DEVICE_SUFFIX}_{self._consumer_id}")},
-            via_device=(DOMAIN, f"{entry.entry_id}_{DIVIDER_DEVICE_SUFFIX}"),
-            name=consumer.get(CONSUMER_NAME, "Consumer"),
-            manufacturer="Solar Energy Flow",
-            model="Energy Divider Consumer",
-        )
-        self._default_value = CONSUMER_DEFAULT_START_DELAY_S if is_start else CONSUMER_DEFAULT_STOP_DELAY_S
-        self._current_value: float = self._default_value
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_number_data()
-        if last is not None and last.native_value is not None:
-            self._current_value = round(float(last.native_value), 1)
-        self.async_write_ha_state()
-
-    @property
-    def native_value(self) -> float | None:
-        return self._current_value
-
-    async def async_set_native_value(self, value: float) -> None:
-        self._current_value = round(float(value), 1)
-        self.async_write_ha_state()
-
-
 class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
     _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX
@@ -513,8 +272,8 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
         self._attr_native_min_value = min_value
         self._attr_native_max_value = max_value
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_{PID_DEVICE_SUFFIX}")},
-            name=f"{entry.title} PID Controller",
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
             manufacturer="Solar Energy Flow",
             model="PID Controller",
         )

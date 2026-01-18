@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import logging
-import uuid
-
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers import selector
 
-_LOGGER = logging.getLogger(__name__)
-
 from .const import (
     DOMAIN,
-    CONF_BATTERY_SOC_ENTITY,
     CONF_NAME,
     CONF_PROCESS_VALUE_ENTITY,
     CONF_SETPOINT_ENTITY,
@@ -77,25 +71,12 @@ _PV_DOMAINS = {"sensor", "number", "input_number"}
 _SETPOINT_DOMAINS = {"number", "input_number"}
 _OUTPUT_DOMAINS = {"number", "input_number"}
 _GRID_DOMAINS = {"sensor", "number", "input_number"}
-_BATTERY_SOC_DOMAINS = {"sensor"}
 
 
 def _extract_domain(entity_id: str | None) -> str | None:
     if not entity_id or "." not in entity_id:
         return None
     return entity_id.split(".", 1)[0]
-
-
-def _normalize_battery_soc_entity(value: str | None) -> str | None:
-    """Normalize battery_soc_entity value - return None if empty/None, otherwise return trimmed string."""
-    if not value:
-        return None
-    if isinstance(value, str):
-        value = value.strip()
-        if not value or value == "None":
-            return None
-        return value
-    return None
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -117,35 +98,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_OUTPUT_ENTITY] = "invalid_output_domain"
             if grid_domain not in _GRID_DOMAINS:
                 errors[CONF_GRID_POWER_ENTITY] = "invalid_grid_domain"
-            
-            # Only validate battery_soc_entity if it's provided and not empty
-            battery_soc_entity_value = _normalize_battery_soc_entity(user_input.get(CONF_BATTERY_SOC_ENTITY))
-            if battery_soc_entity_value:
-                battery_soc_domain = _extract_domain(battery_soc_entity_value)
-                if battery_soc_domain and battery_soc_domain not in _BATTERY_SOC_DOMAINS:
-                    errors[CONF_BATTERY_SOC_ENTITY] = "invalid_battery_soc_domain"
 
             range_valid = True
             try:
-                pv_min = round(float(user_input[CONF_PV_MIN]), 1)
-                pv_max = round(float(user_input[CONF_PV_MAX]), 1)
-                sp_min = round(float(user_input[CONF_SP_MIN]), 1)
-                sp_max = round(float(user_input[CONF_SP_MAX]), 1)
-                grid_min = round(float(user_input[CONF_GRID_MIN]), 1)
-                grid_max = round(float(user_input[CONF_GRID_MAX]), 1)
+                pv_min = float(user_input[CONF_PV_MIN])
+                pv_max = float(user_input[CONF_PV_MAX])
+                sp_min = float(user_input[CONF_SP_MIN])
+                sp_max = float(user_input[CONF_SP_MAX])
+                grid_min = float(user_input[CONF_GRID_MIN])
+                grid_max = float(user_input[CONF_GRID_MAX])
             except (TypeError, ValueError):
                 range_valid = False
             else:
                 if pv_max <= pv_min or sp_max <= sp_min or grid_max <= grid_min:
                     range_valid = False
-                else:
-                    # Update user_input with rounded values
-                    user_input[CONF_PV_MIN] = pv_min
-                    user_input[CONF_PV_MAX] = pv_max
-                    user_input[CONF_SP_MIN] = sp_min
-                    user_input[CONF_SP_MAX] = sp_max
-                    user_input[CONF_GRID_MIN] = grid_min
-                    user_input[CONF_GRID_MAX] = grid_max
 
             if not range_valid:
                 errors["base"] = "invalid_range"
@@ -159,12 +125,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
             name = user_input.pop(CONF_NAME)
-            # Normalize battery_soc_entity - remove if empty/None
-            battery_soc_value = _normalize_battery_soc_entity(user_input.get(CONF_BATTERY_SOC_ENTITY))
-            if battery_soc_value:
-                user_input[CONF_BATTERY_SOC_ENTITY] = battery_soc_value
-            else:
-                user_input.pop(CONF_BATTERY_SOC_ENTITY, None)
             return self.async_create_entry(title=name, data=user_input)
 
         return self.async_show_form(step_id="user", data_schema=self._build_user_schema(), errors=errors)
@@ -189,9 +149,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(CONF_GRID_POWER_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
-                ),
-                vol.Optional(CONF_BATTERY_SOC_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))
                 ),
                 vol.Required(CONF_PV_MIN, default=DEFAULT_PV_MIN): vol.Coerce(float),
                 vol.Required(CONF_PV_MAX, default=DEFAULT_PV_MAX): vol.Coerce(float),
@@ -235,57 +192,44 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
 
     @staticmethod
     def _build_schema(defaults: dict) -> vol.Schema:
-        # Build schema dictionary
-        schema_dict = {
-            vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=list(_PV_DOMAINS))
-            ),
-            vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=list(_SETPOINT_DOMAINS))
-            ),
-            vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=list(_OUTPUT_DOMAINS))
-            ),
-            vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
-            ),
-            vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
-            vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
-            vol.Optional(
-                CONF_GRID_POWER_INVERT,
-                default=defaults.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
-            ): bool,
-            vol.Optional(
-                CONF_PID_MODE,
-                default=defaults.get(CONF_PID_MODE, DEFAULT_PID_MODE),
-            ): vol.In([PID_MODE_DIRECT, PID_MODE_REVERSE]),
-            vol.Optional(
-                CONF_UPDATE_INTERVAL,
-                default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=1)),
-            vol.Required(CONF_PV_MIN, default=defaults[CONF_PV_MIN]): vol.Coerce(float),
-            vol.Required(CONF_PV_MAX, default=defaults[CONF_PV_MAX]): vol.Coerce(float),
-            vol.Required(CONF_SP_MIN, default=defaults[CONF_SP_MIN]): vol.Coerce(float),
-            vol.Required(CONF_SP_MAX, default=defaults[CONF_SP_MAX]): vol.Coerce(float),
-            vol.Required(CONF_GRID_MIN, default=defaults[CONF_GRID_MIN]): vol.Coerce(float),
+        return vol.Schema(
+            {
+                vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults[CONF_PROCESS_VALUE_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_PV_DOMAINS))
+                ),
+                vol.Required(CONF_SETPOINT_ENTITY, default=defaults[CONF_SETPOINT_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_SETPOINT_DOMAINS))
+                ),
+                vol.Required(CONF_OUTPUT_ENTITY, default=defaults[CONF_OUTPUT_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_OUTPUT_DOMAINS))
+                ),
+                vol.Required(CONF_GRID_POWER_ENTITY, default=defaults[CONF_GRID_POWER_ENTITY]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
+                ),
+                vol.Optional(CONF_INVERT_PV, default=defaults.get(CONF_INVERT_PV, DEFAULT_INVERT_PV)): bool,
+                vol.Optional(CONF_INVERT_SP, default=defaults.get(CONF_INVERT_SP, DEFAULT_INVERT_SP)): bool,
+                vol.Optional(
+                    CONF_GRID_POWER_INVERT,
+                    default=defaults.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
+                ): bool,
+                vol.Optional(
+                    CONF_PID_MODE,
+                    default=defaults.get(CONF_PID_MODE, DEFAULT_PID_MODE),
+                ): vol.In([PID_MODE_DIRECT, PID_MODE_REVERSE]),
+                vol.Optional(
+                    CONF_UPDATE_INTERVAL,
+                    default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+                vol.Required(CONF_PV_MIN, default=defaults[CONF_PV_MIN]): vol.Coerce(float),
+                vol.Required(CONF_PV_MAX, default=defaults[CONF_PV_MAX]): vol.Coerce(float),
+                vol.Required(CONF_SP_MIN, default=defaults[CONF_SP_MIN]): vol.Coerce(float),
+                vol.Required(CONF_SP_MAX, default=defaults[CONF_SP_MAX]): vol.Coerce(float),
+                vol.Required(CONF_GRID_MIN, default=defaults[CONF_GRID_MIN]): vol.Coerce(float),
                 vol.Required(CONF_GRID_MAX, default=defaults[CONF_GRID_MAX]): vol.Coerce(float),
-        }
-        
-        # Add battery_soc_entity - only include default if we have a valid non-empty string value
-        battery_soc_default = defaults.get(CONF_BATTERY_SOC_ENTITY)
-        if battery_soc_default and isinstance(battery_soc_default, str) and battery_soc_default.strip():
-            schema_dict[vol.Optional(CONF_BATTERY_SOC_ENTITY, default=battery_soc_default.strip())] = selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))
-            )
-        else:
-            # No default - EntitySelector handles empty/None values correctly without a default
-            schema_dict[vol.Optional(CONF_BATTERY_SOC_ENTITY)] = selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=list(_BATTERY_SOC_DOMAINS))
-            )
-        
-        return vol.Schema(schema_dict)
+            }
+        )
 
-    async def async_step_init_settings(self, user_input=None):
+    async def async_step_init(self, user_input=None):
         o = self._config_entry.options
         errors: dict[str, str] = {}
 
@@ -324,9 +268,6 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_GRID_POWER_ENTITY: o.get(
                 CONF_GRID_POWER_ENTITY, self._config_entry.data.get(CONF_GRID_POWER_ENTITY, "")
             ),
-            CONF_BATTERY_SOC_ENTITY: _normalize_battery_soc_entity(
-                o.get(CONF_BATTERY_SOC_ENTITY, self._config_entry.data.get(CONF_BATTERY_SOC_ENTITY))
-            ),
             CONF_INVERT_PV: o.get(CONF_INVERT_PV, DEFAULT_INVERT_PV),
             CONF_INVERT_SP: o.get(CONF_INVERT_SP, DEFAULT_INVERT_SP),
             CONF_GRID_POWER_INVERT: o.get(CONF_GRID_POWER_INVERT, DEFAULT_GRID_POWER_INVERT),
@@ -336,12 +277,12 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                 DEFAULT_UPDATE_INTERVAL,
                 min_value=1,
             ),
-            CONF_PV_MIN: round(float(o.get(CONF_PV_MIN, self._config_entry.data.get(CONF_PV_MIN, DEFAULT_PV_MIN))), 1),
-            CONF_PV_MAX: round(float(o.get(CONF_PV_MAX, self._config_entry.data.get(CONF_PV_MAX, DEFAULT_PV_MAX))), 1),
-            CONF_SP_MIN: round(float(o.get(CONF_SP_MIN, self._config_entry.data.get(CONF_SP_MIN, DEFAULT_SP_MIN))), 1),
-            CONF_SP_MAX: round(float(o.get(CONF_SP_MAX, self._config_entry.data.get(CONF_SP_MAX, DEFAULT_SP_MAX))), 1),
-            CONF_GRID_MIN: round(float(o.get(CONF_GRID_MIN, self._config_entry.data.get(CONF_GRID_MIN, DEFAULT_GRID_MIN))), 1),
-            CONF_GRID_MAX: round(float(o.get(CONF_GRID_MAX, self._config_entry.data.get(CONF_GRID_MAX, DEFAULT_GRID_MAX))), 1),
+            CONF_PV_MIN: o.get(CONF_PV_MIN, self._config_entry.data.get(CONF_PV_MIN, DEFAULT_PV_MIN)),
+            CONF_PV_MAX: o.get(CONF_PV_MAX, self._config_entry.data.get(CONF_PV_MAX, DEFAULT_PV_MAX)),
+            CONF_SP_MIN: o.get(CONF_SP_MIN, self._config_entry.data.get(CONF_SP_MIN, DEFAULT_SP_MIN)),
+            CONF_SP_MAX: o.get(CONF_SP_MAX, self._config_entry.data.get(CONF_SP_MAX, DEFAULT_SP_MAX)),
+            CONF_GRID_MIN: o.get(CONF_GRID_MIN, self._config_entry.data.get(CONF_GRID_MIN, DEFAULT_GRID_MIN)),
+            CONF_GRID_MAX: o.get(CONF_GRID_MAX, self._config_entry.data.get(CONF_GRID_MAX, DEFAULT_GRID_MAX)),
         }
 
         if user_input is not None:
@@ -359,24 +300,13 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     defaults[CONF_UPDATE_INTERVAL],
                     min_value=1,
                 ),
-                CONF_PV_MIN: round(float(user_input.get(CONF_PV_MIN, defaults[CONF_PV_MIN])), 1),
-                CONF_PV_MAX: round(float(user_input.get(CONF_PV_MAX, defaults[CONF_PV_MAX])), 1),
-                CONF_SP_MIN: round(float(user_input.get(CONF_SP_MIN, defaults[CONF_SP_MIN])), 1),
-                CONF_SP_MAX: round(float(user_input.get(CONF_SP_MAX, defaults[CONF_SP_MAX])), 1),
-            CONF_GRID_MIN: round(float(user_input.get(CONF_GRID_MIN, defaults[CONF_GRID_MIN])), 1),
-            CONF_GRID_MAX: round(float(user_input.get(CONF_GRID_MAX, defaults[CONF_GRID_MAX])), 1),
+                CONF_PV_MIN: user_input.get(CONF_PV_MIN, defaults[CONF_PV_MIN]),
+                CONF_PV_MAX: user_input.get(CONF_PV_MAX, defaults[CONF_PV_MAX]),
+                CONF_SP_MIN: user_input.get(CONF_SP_MIN, defaults[CONF_SP_MIN]),
+                CONF_SP_MAX: user_input.get(CONF_SP_MAX, defaults[CONF_SP_MAX]),
+                CONF_GRID_MIN: user_input.get(CONF_GRID_MIN, defaults[CONF_GRID_MIN]),
+                CONF_GRID_MAX: user_input.get(CONF_GRID_MAX, defaults[CONF_GRID_MAX]),
             }
-            
-            # Handle battery_soc_entity separately - it's optional, so only include if it has a valid non-empty value
-            battery_soc_value = _normalize_battery_soc_entity(
-                user_input.get(CONF_BATTERY_SOC_ENTITY, defaults.get(CONF_BATTERY_SOC_ENTITY))
-            )
-            if battery_soc_value:
-                cleaned[CONF_BATTERY_SOC_ENTITY] = battery_soc_value
-                # Validate the domain
-                battery_soc_domain = _extract_domain(battery_soc_value)
-                if battery_soc_domain and battery_soc_domain not in _BATTERY_SOC_DOMAINS:
-                    errors[CONF_BATTERY_SOC_ENTITY] = "invalid_battery_soc_domain"
 
             pv_domain = _extract_domain(cleaned[CONF_PROCESS_VALUE_ENTITY])
             sp_domain = _extract_domain(cleaned[CONF_SETPOINT_ENTITY])
@@ -408,9 +338,9 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     output_epsilon_val = float(output_epsilon)
                 except (TypeError, ValueError):
                     errors["base"] = "invalid_output_epsilon"
-                else:
-                    if output_epsilon_val < 0:
-                        errors["base"] = "invalid_output_epsilon"
+            else:
+                if output_epsilon_val < 0:
+                    errors["base"] = "invalid_output_epsilon"
 
             if "base" not in errors:
                 if not self._validate_range(cleaned[CONF_PV_MIN], cleaned[CONF_PV_MAX]):
@@ -422,60 +352,15 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
 
             if errors:
                 return self.async_show_form(
-                    step_id="init_settings",
+                    step_id="init",
                     data_schema=self._build_schema(defaults),
                     errors=errors,
                 )
 
-            options = {**preserved, **cleaned}
-            # Normalize battery_soc_entity - remove if empty/None
-            battery_soc_in_options = _normalize_battery_soc_entity(options.get(CONF_BATTERY_SOC_ENTITY))
-            if battery_soc_in_options:
-                options[CONF_BATTERY_SOC_ENTITY] = battery_soc_in_options
-            else:
-                options.pop(CONF_BATTERY_SOC_ENTITY, None)
-            return self.async_create_entry(title="", data=options)
+            return self.async_create_entry(title="", data={**preserved, **cleaned})
 
-        try:
-            schema = self._build_schema(defaults)
-        except Exception as e:
-            _LOGGER.exception("Error building schema in async_step_init_settings: %s", e)
-            errors["base"] = "schema_error"
-            # Fallback: remove battery_soc_entity from defaults and rebuild
-            defaults_fallback = defaults.copy()
-            defaults_fallback.pop(CONF_BATTERY_SOC_ENTITY, None)
-            try:
-                schema = self._build_schema(defaults_fallback)
-            except Exception as e2:
-                _LOGGER.exception("Error building fallback schema: %s", e2)
-                # Last resort: return basic schema
-                schema = vol.Schema({
-                    vol.Required(CONF_PROCESS_VALUE_ENTITY, default=defaults.get(CONF_PROCESS_VALUE_ENTITY, "")): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain=list(_PV_DOMAINS))
-                    ),
-                    vol.Required(CONF_SETPOINT_ENTITY, default=defaults.get(CONF_SETPOINT_ENTITY, "")): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain=list(_SETPOINT_DOMAINS))
-                    ),
-                    vol.Required(CONF_OUTPUT_ENTITY, default=defaults.get(CONF_OUTPUT_ENTITY, "")): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain=list(_OUTPUT_DOMAINS))
-                    ),
-                    vol.Required(CONF_GRID_POWER_ENTITY, default=defaults.get(CONF_GRID_POWER_ENTITY, "")): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain=list(_GRID_DOMAINS))
-                    ),
-                })
-        
         return self.async_show_form(
-            step_id="init_settings",
-            data_schema=schema,
+            step_id="init",
+            data_schema=self._build_schema(defaults),
             errors=errors,
         )
-
-    async def async_step_init(self, user_input=None):
-        menu_options = {"configure": "Configure"}
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=menu_options,
-        )
-
-    async def async_step_configure(self, user_input=None):
-        return await self.async_step_init_settings(user_input)

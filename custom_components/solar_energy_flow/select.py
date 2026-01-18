@@ -34,15 +34,12 @@ from .const import (
     RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
-    HUB_DEVICE_SUFFIX,
-    PID_DEVICE_SUFFIX,
 )
 from .coordinator import SolarEnergyFlowCoordinator
-from .helpers import get_entry_coordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    coordinator: SolarEnergyFlowCoordinator = get_entry_coordinator(hass, entry.entry_id)
+    coordinator: SolarEnergyFlowCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
             SolarEnergyFlowSelect(
@@ -89,8 +86,8 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
         self._attr_options = options
         self._attr_entity_category = entity_category
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}_{PID_DEVICE_SUFFIX}")},
-            name=f"{entry.title} PID Controller",
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
             manufacturer="Solar Energy Flow",
             model="PID Controller",
         )

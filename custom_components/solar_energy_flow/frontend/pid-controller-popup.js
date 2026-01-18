@@ -128,16 +128,19 @@ class PIDControllerPopup extends LitElement {
   _startLiveUpdates() {
     if (this._updateInterval) {
       clearInterval(this._updateInterval);
+      this._updateInterval = null;
     }
+    if (!this.hass || !this.config) return;
+    
+    // Initial update immediately
+    this._updateReadOnlyValues();
+    
+    // Then update every second
     this._updateInterval = setInterval(() => {
       if (this.hass && this.config) {
         this._updateReadOnlyValues();
       }
     }, 1000);
-    // Initial update
-    if (this.hass && this.config) {
-      this._updateReadOnlyValues();
-    }
   }
 
   disconnectedCallback() {
@@ -162,8 +165,13 @@ class PIDControllerPopup extends LitElement {
   updated(changedProperties) {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
       this._updateData();
-      if (this.hass && this.config && !this._updateInterval) {
-        this._startLiveUpdates();
+      if (this.hass && this.config) {
+        if (!this._updateInterval) {
+          this._startLiveUpdates();
+        } else {
+          // Force an immediate update when hass/config changes
+          this._updateReadOnlyValues();
+        }
       }
     }
     if (changedProperties.has("hass")) {
@@ -254,35 +262,69 @@ class PIDControllerPopup extends LitElement {
     if (!this.hass || !this.config) return;
 
     const state = this.hass.states[this.config.pid_entity];
-    if (state?.attributes) {
-      const attrs = state.attributes;
-      const hasChanges = 
-        this._data.pv_value !== (attrs.pv_value ?? null) ||
-        this._data.effective_sp !== (attrs.effective_sp ?? null) ||
-        this._data.error !== (attrs.error ?? null) ||
-        this._data.output !== (attrs.output ?? null) ||
-        this._data.p_term !== (attrs.p_term ?? null) ||
-        this._data.i_term !== (attrs.i_term ?? null) ||
-        this._data.d_term !== (attrs.d_term ?? null) ||
-        this._data.grid_power !== (attrs.grid_power ?? null) ||
-        this._data.status !== (attrs.status || "unknown") ||
-        this._data.limiter_state !== (attrs.limiter_state ?? null) ||
-        this._data.output_pre_rate_limit !== (attrs.output_pre_rate_limit ?? null);
-      
-      if (hasChanges) {
-        this._data.pv_value = attrs.pv_value ?? null;
-        this._data.effective_sp = attrs.effective_sp ?? null;
-        this._data.error = attrs.error ?? null;
-        this._data.output = attrs.output ?? null;
-        this._data.p_term = attrs.p_term ?? null;
-        this._data.i_term = attrs.i_term ?? null;
-        this._data.d_term = attrs.d_term ?? null;
-        this._data.grid_power = attrs.grid_power ?? null;
-        this._data.status = attrs.status || "unknown";
-        this._data.limiter_state = attrs.limiter_state ?? null;
-        this._data.output_pre_rate_limit = attrs.output_pre_rate_limit ?? null;
-        this.requestUpdate();
+    if (!state?.attributes) return;
+
+    const attrs = state.attributes;
+    let hasChanges = false;
+    
+    // Compare values with proper type handling
+    const compareValue = (oldVal, newVal) => {
+      if (oldVal === newVal) return false;
+      if (oldVal === null || oldVal === undefined) return newVal !== null && newVal !== undefined;
+      if (newVal === null || newVal === undefined) return true;
+      if (typeof oldVal === "number" && typeof newVal === "number") {
+        return Math.abs(oldVal - newVal) > 0.01;
       }
+      return String(oldVal) !== String(newVal);
+    };
+    
+    if (compareValue(this._data.pv_value, attrs.pv_value)) {
+      this._data.pv_value = attrs.pv_value ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.effective_sp, attrs.effective_sp)) {
+      this._data.effective_sp = attrs.effective_sp ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.error, attrs.error)) {
+      this._data.error = attrs.error ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.output, attrs.output)) {
+      this._data.output = attrs.output ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.p_term, attrs.p_term)) {
+      this._data.p_term = attrs.p_term ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.i_term, attrs.i_term)) {
+      this._data.i_term = attrs.i_term ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.d_term, attrs.d_term)) {
+      this._data.d_term = attrs.d_term ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.grid_power, attrs.grid_power)) {
+      this._data.grid_power = attrs.grid_power ?? null;
+      hasChanges = true;
+    }
+    if (this._data.status !== (attrs.status || "unknown")) {
+      this._data.status = attrs.status || "unknown";
+      hasChanges = true;
+    }
+    if (this._data.limiter_state !== (attrs.limiter_state ?? null)) {
+      this._data.limiter_state = attrs.limiter_state ?? null;
+      hasChanges = true;
+    }
+    if (compareValue(this._data.output_pre_rate_limit, attrs.output_pre_rate_limit)) {
+      this._data.output_pre_rate_limit = attrs.output_pre_rate_limit ?? null;
+      hasChanges = true;
+    }
+    
+    if (hasChanges) {
+      this.requestUpdate();
     }
   }
 
@@ -342,12 +384,32 @@ class PIDControllerPopup extends LitElement {
     return mode.replace(/_/g, " ");
   }
 
+  _findEntityId(domain, suffix) {
+    const statusEntity = this.config.pid_entity;
+    const deviceName = statusEntity.replace(/^sensor\./, "").replace(/_status$/, "");
+    const candidateId = `${domain}.${deviceName}_${suffix}`;
+    
+    // Check if entity exists
+    if (this.hass.states[candidateId]) {
+      return candidateId;
+    }
+    
+    // Try alternative: search for entity with matching suffix
+    const prefix = `${domain}.${deviceName}`;
+    for (const entityId in this.hass.states) {
+      if (entityId.startsWith(prefix) && entityId.endsWith(`_${suffix}`)) {
+        return entityId;
+      }
+    }
+    
+    // Fallback to candidate
+    return candidateId;
+  }
+
   async _save() {
     if (!this._hasEdits()) return;
 
     const patch = { ...this._edited };
-    const statusEntity = this.config.pid_entity;
-    const deviceName = statusEntity.replace(/^sensor\./, "").replace(/_status$/, "");
     const numberMappings = {
       kp: "kp",
       ki: "ki",
@@ -363,8 +425,9 @@ class PIDControllerPopup extends LitElement {
       const now = Date.now();
       
       if (patch.enabled !== undefined) {
+        const entityId = this._findEntityId("switch", "enabled");
         await this.hass.callService("switch", patch.enabled ? "turn_on" : "turn_off", {
-          entity_id: `switch.${deviceName}_enabled`,
+          entity_id: entityId,
         });
         this._data.enabled = patch.enabled;
         this._savedFields.set("enabled", now);
@@ -372,8 +435,9 @@ class PIDControllerPopup extends LitElement {
       }
       
       if (patch.runtime_mode !== undefined) {
+        const entityId = this._findEntityId("select", "runtime_mode");
         await this.hass.callService("select", "select_option", {
-          entity_id: `select.${deviceName}_runtime_mode`,
+          entity_id: entityId,
           option: patch.runtime_mode,
         });
         this._data.runtime_mode = patch.runtime_mode;
@@ -383,7 +447,7 @@ class PIDControllerPopup extends LitElement {
       
       for (const [key, entitySuffix] of Object.entries(numberMappings)) {
         if (patch[key] !== undefined) {
-          const entityId = `number.${deviceName}_${entitySuffix}`;
+          const entityId = this._findEntityId("number", entitySuffix);
           try {
             await this.hass.callService("number", "set_value", {
               entity_id: entityId,
@@ -391,8 +455,10 @@ class PIDControllerPopup extends LitElement {
             });
             this._data[key] = patch[key];
             this._savedFields.set(key, now);
+            console.log(`Saved ${key} = ${patch[key]} to ${entityId}`);
           } catch (err) {
             console.error(`Error saving ${key} to ${entityId}:`, err);
+            alert(`Error saving ${key}: ${err.message || err}`);
             throw err;
           }
         }
@@ -401,8 +467,10 @@ class PIDControllerPopup extends LitElement {
       this._edited = {};
       this.requestUpdate();
     } catch (err) {
-      alert(`Error saving: ${err.message || err}`);
       console.error("Error saving PID settings:", err);
+      if (!err.message || !err.message.includes("Error saving")) {
+        alert(`Error saving: ${err.message || err}`);
+      }
     }
   }
 

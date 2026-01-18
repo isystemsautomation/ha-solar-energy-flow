@@ -203,8 +203,14 @@ class PIDControllerMini extends LitElement {
     popupCard.config = { pid_entity: this.config.pid_entity };
     
     dialog.addEventListener("closed", () => {
-      if (dialog.parentNode) {
-        document.body.removeChild(dialog);
+      // Check if dialog is still in the DOM before removing
+      if (dialog.parentNode === document.body) {
+        try {
+          document.body.removeChild(dialog);
+        } catch (e) {
+          // Dialog may have already been removed, ignore error
+          console.debug("Dialog already removed:", e);
+        }
       }
     });
     

@@ -17,16 +17,23 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up via YAML (not supported) or allow config flow to run."""
+    _LOGGER.info("Solar Energy Flow: Initializing integration (async_setup called)")
+    
     # Register static path for frontend resources
     frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
     if os.path.isdir(frontend_path):
         hass.http.register_static_path(
             f"/{DOMAIN}/frontend", frontend_path, cache_headers=False
         )
+        _LOGGER.info("Solar Energy Flow: Registered static path: /%s/frontend -> %s", DOMAIN, frontend_path)
+    else:
+        _LOGGER.warning("Solar Energy Flow: Frontend directory not found: %s", frontend_path)
 
     # Auto-register Lovelace resources on HA start
     async def register_resources(_event: Event) -> None:
         """Register custom card resources automatically."""
+        _LOGGER.info("Attempting to register Lovelace resources for %s", DOMAIN)
+        
         # Get version from manifest
         version = "0.1.2"
         try:
@@ -36,8 +43,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 with open(manifest_path, "r", encoding="utf-8") as f:
                     manifest = json.load(f)
                     version = manifest.get("version", version)
-        except Exception:
-            pass
+        except Exception as err:
+            _LOGGER.debug("Could not read version from manifest: %s", err)
 
         resources = [
             {
@@ -50,44 +57,71 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             },
         ]
 
-        # Check if Lovelace resources component is available
-        if not hasattr(lovelace, "resources") or not hasattr(
-            lovelace.resources, "async_create_item"
-        ):
-            _LOGGER.warning(
-                "Lovelace resources API not available. Cards must be added manually via Settings → Dashboards → Resources"
-            )
-            return
-
-        # Get existing resources to avoid duplicates
-        existing_resources = []
+        # Try to access Lovelace resources API
         try:
-            existing_resources_list = await lovelace.resources.async_get_info(hass)
-            existing_resources = [
-                item.get("url", "") for item in existing_resources_list if item
-            ]
-        except Exception:
-            pass
-
-        # Register resources if not already present
-        for resource in resources:
-            if resource["url"] in existing_resources:
-                _LOGGER.debug(
-                    "Lovelace resource already exists: %s", resource["url"]
-                )
-                continue
-
-            try:
-                await lovelace.resources.async_create_item(
-                    hass, {"url": resource["url"], "type": resource["type"]}
-                )
-                _LOGGER.info(
-                    "Registered Lovelace resource: %s (%s)", resource["url"], resource["type"]
-                )
-            except Exception as err:
+            # Check if lovelace module has resources
+            if not hasattr(lovelace, "resources"):
                 _LOGGER.warning(
-                    "Failed to register Lovelace resource %s: %s", resource["url"], err
+                    "Lovelace resources API not found. Please add cards manually: "
+                    "Settings → Dashboards → Resources. URLs: %s",
+                    [r["url"] for r in resources]
                 )
+                return
+            
+            resources_api = lovelace.resources
+            if not hasattr(resources_api, "async_create_item"):
+                _LOGGER.warning(
+                    "Lovelace resources.async_create_item not found. Please add cards manually: "
+                    "Settings → Dashboards → Resources. URLs: %s",
+                    [r["url"] for r in resources]
+                )
+                return
+
+            # Get existing resources to avoid duplicates
+            existing_resources = []
+            try:
+                existing_resources_list = await resources_api.async_get_info(hass)
+                if existing_resources_list:
+                    existing_resources = [
+                        item.get("url", "") if isinstance(item, dict) else str(item)
+                        for item in existing_resources_list
+                        if item
+                    ]
+            except Exception as err:
+                _LOGGER.debug("Could not get existing resources: %s", err)
+
+            # Register resources if not already present
+            registered_count = 0
+            for resource in resources:
+                resource_url = resource["url"]
+                if resource_url in existing_resources:
+                    _LOGGER.debug("Lovelace resource already exists: %s", resource_url)
+                    continue
+
+                try:
+                    await resources_api.async_create_item(
+                        hass, {"url": resource_url, "type": resource["type"]}
+                    )
+                    _LOGGER.info(
+                        "✓ Registered Lovelace resource: %s (%s)", resource_url, resource["type"]
+                    )
+                    registered_count += 1
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to register Lovelace resource %s: %s", resource_url, err
+                    )
+            
+            if registered_count > 0:
+                _LOGGER.info("Successfully registered %d Lovelace resource(s) for %s", registered_count, DOMAIN)
+            else:
+                _LOGGER.debug("All resources already registered or registration skipped")
+                
+        except Exception as err:
+            _LOGGER.warning(
+                "Error accessing Lovelace resources API: %s. Please add cards manually: "
+                "Settings → Dashboards → Resources. URLs: %s",
+                err, [r["url"] for r in resources]
+            )
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, register_resources)
 

@@ -106,13 +106,36 @@ class PID:
             output_saturated = (u_pid < self.cfg.min_output) or (u_pid > self.cfg.max_output)
             rate_limited = rate_limiter_enabled and rate_limit > 0 and last_output is not None and u_out != u_sat
             
+            # Calculate integral update
+            integral_update = 0.0
             if not output_saturated and not rate_limited:
                 # Output is within limits and not rate-limited: normal integral accumulation with anti-windup
-                self._integral += self.cfg.ki * error * dt + self._kaw * (u_out - u_pid) * dt
+                integral_update = self.cfg.ki * error * dt + self._kaw * (u_out - u_pid) * dt
             else:
                 # Output is saturated or rate-limited: only apply anti-windup, don't accumulate error
                 # This prevents the integral from growing when the output can't respond
-                self._integral += self._kaw * (u_out - u_pid) * dt
+                integral_update = self._kaw * (u_out - u_pid) * dt
+            
+            # Apply integral update with clamping to prevent unbounded growth
+            # Clamp integral to reasonable range: allow integral to drive full output range plus safety margin
+            # Since integral is already multiplied by Ki, clamp it based on output range
+            output_range = abs(self.cfg.max_output - self.cfg.min_output)
+            if output_range > 0:
+                # Clamp to ±(5x output range) as a safety limit
+                # This prevents runaway while still allowing integral to contribute meaningfully
+                max_integral = output_range * 5.0
+                new_integral = self._integral + integral_update
+                
+                # If integral exceeds limit significantly, reset it to prevent oscillation
+                # This handles cases where integral has grown too large due to persistent error
+                if abs(new_integral) > max_integral * 1.5:
+                    # Reset to a smaller value in the same direction to prevent sudden jumps
+                    self._integral = max_integral if new_integral > 0 else -max_integral
+                else:
+                    self._integral = max(-max_integral, min(max_integral, new_integral))
+            else:
+                # Fallback: just apply update if range is invalid
+                self._integral += integral_update
 
         self._prev_pv = pv
         self._prev_t = now

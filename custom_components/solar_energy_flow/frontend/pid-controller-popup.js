@@ -653,10 +653,17 @@ class PIDControllerPopup extends LitElement {
         if (patch[key] !== undefined) {
           const entityId = this._findEntityId("number", entitySuffix);
           try {
+            // Call the service - this should trigger the entity's async_set_native_value
+            // which updates the coordinator's _manual_sp_value and triggers a refresh
             await this.hass.callService("number", "set_value", {
               entity_id: entityId,
               value: patch[key],
             });
+            
+            // Give the service call time to complete and trigger coordinator update
+            // The entity's async_set_native_value is async, so we need to wait a bit
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
             // Update _data immediately with saved value - this is the source of truth
             this._data[key] = patch[key];
             // Mark as saved with timestamp - this prevents overwriting for 10 seconds
@@ -666,20 +673,25 @@ class PIDControllerPopup extends LitElement {
             console.log(`Saved ${key} = ${patch[key]} to ${entityId}, marked as saved at ${now}, will protect for 10 seconds`);
             
             // If this is manual_sp, the effective_sp will update after coordinator refresh
-            // The coordinator needs to recalculate the setpoint, which happens on its next update cycle
-            // The number entity's async_set_native_value should trigger coordinator.async_request_refresh()
-            // but there might be a delay, so we'll keep checking
+            // The coordinator's async_set_manual_sp should have been called by the entity
+            // and async_request_refresh should trigger a recalculation
             if (key === "manual_sp") {
               const expectedSP = patch[key];
               console.log(`Waiting for effective_sp to update to ${expectedSP}...`);
               
-              // Update immediately
+              // Update immediately to get current state
               this._updateReadOnlyValues();
               
               // Check if effective_sp has updated to match our saved manual_sp
               const checkSPUpdate = () => {
                 const state = this.hass?.states[this.config?.pid_entity];
-                const currentSP = state?.attributes?.effective_sp;
+                if (!state?.attributes) return false;
+                
+                const currentSP = state.attributes.effective_sp;
+                const currentManualSP = state.attributes.manual_sp;
+                
+                console.log(`Checking: effective_sp=${currentSP}, manual_sp=${currentManualSP}, expected=${expectedSP}`);
+                
                 if (currentSP !== null && currentSP !== undefined) {
                   const spDiff = Math.abs(currentSP - expectedSP);
                   if (spDiff < 0.1) {
@@ -691,16 +703,22 @@ class PIDControllerPopup extends LitElement {
                 return false; // Not updated yet
               };
               
+              // Check immediately first
+              if (checkSPUpdate()) {
+                console.log(`effective_sp already updated!`);
+                return; // Already updated, no need to keep checking
+              }
+              
               // Check at intervals
               let checkCount = 0;
-              const maxChecks = 15; // Check for up to 15 seconds
+              const maxChecks = 20; // Check for up to 20 seconds (coordinator might have slow update interval)
               const checkInterval = setInterval(() => {
                 checkCount++;
                 this._updateReadOnlyValues();
                 if (checkSPUpdate() || checkCount >= maxChecks) {
                   clearInterval(checkInterval);
                   if (checkCount >= maxChecks) {
-                    console.warn(`effective_sp did not update to ${expectedSP} after ${maxChecks} checks`);
+                    console.warn(`effective_sp did not update to ${expectedSP} after ${maxChecks} checks. Coordinator may not be refreshing.`);
                   }
                 }
               }, 1000); // Check every second

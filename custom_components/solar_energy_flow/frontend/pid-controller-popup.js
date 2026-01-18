@@ -385,10 +385,15 @@ class PIDControllerPopup extends LitElement {
       
       const numberFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output'];
       for (const field of numberFields) {
+        // If field is being edited, preserve the edited value at all costs
         if (this._editingFields.has(field)) {
-          data[field] = this._edited[field] ?? this._data[field] ?? attrs[field] ?? null;
-        } else if (this._edited[field] !== undefined) {
+          // Use edited value if it exists, otherwise keep current data value
+          data[field] = this._edited[field] !== undefined ? this._edited[field] : this._data[field];
+          continue;
+        }
+        if (this._edited[field] !== undefined) {
           data[field] = this._edited[field];
+          continue;
         } else {
           const savedTime = this._savedFields.get(field);
           if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
@@ -515,10 +520,14 @@ class PIDControllerPopup extends LitElement {
   }
 
   _getValue(key) {
-    // If field is being edited, always return the edited value (even if undefined/null)
-    // This ensures the input field shows what the user is typing
+    // Priority: edited value > data value
+    // If field is being edited and has an edited value, always use that
+    if (this._editingFields.has(key) && this._edited[key] !== undefined) {
+      return this._edited[key];
+    }
+    // If field is being edited but no edited value yet, use data value or empty string
     if (this._editingFields.has(key)) {
-      return this._edited[key] !== undefined ? this._edited[key] : (this._data[key] ?? "");
+      return this._data[key] ?? "";
     }
     // Otherwise return edited value if exists, else data value
     return this._edited[key] !== undefined ? this._edited[key] : this._data[key];
@@ -541,23 +550,30 @@ class PIDControllerPopup extends LitElement {
 
   _onNumberChanged(key, ev) {
     const inputValue = ev.target.value;
-    const value = parseFloat(inputValue);
     
     // Always add to editing fields when user is typing
     this._editingFields.add(key);
     
-    if (!isNaN(value)) {
-      this._edited[key] = value;
-      this._data[key] = value;
-    } else if (inputValue === "" || inputValue === "-" || inputValue === "." || inputValue === "-.") {
+    // Store the raw input value temporarily to allow partial input (e.g., "-", ".")
+    if (inputValue === "" || inputValue === "-" || inputValue === "." || inputValue === "-.") {
       // Allow empty, minus sign, or decimal point while typing
-      this._edited[key] = undefined;
+      // Don't set _edited to undefined, keep the previous value or use null
+      this._edited[key] = null;
       this._data[key] = null;
     } else {
-      // Invalid input - keep previous value
-      return;
+      const value = parseFloat(inputValue);
+      if (!isNaN(value)) {
+        this._edited[key] = value;
+        this._data[key] = value;
+      } else {
+        // Invalid input - restore previous value
+        const prevValue = this._getValue(key);
+        ev.target.value = prevValue !== null && prevValue !== undefined ? String(prevValue) : "";
+        return;
+      }
     }
     
+    // Force immediate update to show the typed value
     this.requestUpdate();
   }
 
@@ -791,11 +807,18 @@ class PIDControllerPopup extends LitElement {
               <div class="control-label">Manual Output</div>
               <ha-textfield
                 type="number"
-                .value=${String(manual_out ?? "")}
-                @input=${(e) => this._onNumberChanged("manual_out", e)}
-                @blur=${(e) => this._onNumberBlur("manual_out", e)}
+                .value=${this._editingFields.has("manual_out") && this._edited.manual_out !== undefined 
+                  ? String(this._edited.manual_out) 
+                  : String(manual_out ?? "")}
+                @input=${(e) => {
+                  e.stopPropagation();
+                  this._onNumberChanged("manual_out", e);
+                }}
+                @blur=${(e) => {
+                  e.stopPropagation();
+                  this._onNumberBlur("manual_out", e);
+                }}
                 placeholder="—"
-                .disabled=${false}
               ></ha-textfield>
             </div>
 
@@ -803,11 +826,18 @@ class PIDControllerPopup extends LitElement {
               <div class="control-label">Manual Setpoint</div>
               <ha-textfield
                 type="number"
-                .value=${String(manual_sp ?? "")}
-                @input=${(e) => this._onNumberChanged("manual_sp", e)}
-                @blur=${(e) => this._onNumberBlur("manual_sp", e)}
+                .value=${this._editingFields.has("manual_sp") && this._edited.manual_sp !== undefined 
+                  ? String(this._edited.manual_sp) 
+                  : String(manual_sp ?? "")}
+                @input=${(e) => {
+                  e.stopPropagation();
+                  this._onNumberChanged("manual_sp", e);
+                }}
+                @blur=${(e) => {
+                  e.stopPropagation();
+                  this._onNumberBlur("manual_sp", e);
+                }}
                 placeholder="—"
-                .disabled=${false}
               ></ha-textfield>
             </div>
           </div>

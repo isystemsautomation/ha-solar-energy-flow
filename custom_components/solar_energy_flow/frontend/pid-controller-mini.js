@@ -94,11 +94,17 @@ class PIDControllerMini extends LitElement {
       margin-top: 16px;
       padding-top: 16px;
       border-top: 1px solid var(--divider-color);
+      min-height: 200px;
     }
 
     .graph-container ha-card {
       box-shadow: none;
       padding: 0;
+    }
+
+    .graph-container hui-history-graph-card {
+      display: block;
+      width: 100%;
     }
   `;
 
@@ -141,7 +147,7 @@ class PIDControllerMini extends LitElement {
   }
 
   getCardSize() {
-    return 3;
+    return 6; // Increased to accommodate graph
   }
 
   updated(changedProperties) {
@@ -161,6 +167,15 @@ class PIDControllerMini extends LitElement {
     const container = this.shadowRoot?.getElementById("graph-container");
     if (!container) return;
 
+    // Don't recreate if already exists
+    if (container.querySelector("hui-history-graph-card")) {
+      const existingCard = container.querySelector("hui-history-graph-card");
+      if (existingCard.hass !== this.hass) {
+        existingCard.hass = this.hass;
+      }
+      return;
+    }
+
     // Clear existing graph
     container.innerHTML = "";
 
@@ -169,15 +184,29 @@ class PIDControllerMini extends LitElement {
       window.loadCardHelpers().then((helpers) => {
         const cardConfig = {
           type: "history-graph",
-          entities: [entityIds.pv, entityIds.sp, entityIds.output],
+          entities: [
+            {
+              entity: entityIds.pv,
+              name: "PV"
+            },
+            {
+              entity: entityIds.sp,
+              name: "SP"
+            },
+            {
+              entity: entityIds.output,
+              name: "Output"
+            }
+          ],
           hours_to_show: 1,
-          refresh_interval: 60,
+          refresh_interval: 30,
         };
 
         const card = helpers.createCardElement(cardConfig);
         card.hass = this.hass;
         container.appendChild(card);
-      }).catch(() => {
+      }).catch((err) => {
+        console.error("Failed to create history graph:", err);
         // Fallback: create simple text if card helper fails
         container.innerHTML = "<div style='padding: 8px; color: var(--secondary-text-color); font-size: 12px;'>Graph unavailable</div>";
       });

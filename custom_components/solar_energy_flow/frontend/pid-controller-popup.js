@@ -194,73 +194,17 @@ class PIDControllerPopup extends LitElement {
 
   _checkEntityStateChanges() {
     if (!this.hass || !this.config) return;
-    // Don't update while user is editing any field - this is critical to prevent overwriting user input
-    if (this._editingFields.size > 0) {
-      return;
-    }
+    if (this._editingFields.size > 0) return;
     
     const state = this.hass.states[this.config.pid_entity];
     if (!state?.attributes) return;
     
     const attrs = state.attributes;
     let hasChanges = false;
-    
     const now = Date.now();
     const SAVE_TIMEOUT = 30000;
     
-    if (!this._editingFields.has("manual_sp")) {
-      const savedTime = this._savedFields.get("manual_sp");
-      if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
-        const numberEntityId = this._findEntityId("number", "manual_sp_value");
-        const numberEntityState = this.hass?.states[numberEntityId];
-        const numberEntityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
-        const savedValue = this._data.manual_sp ?? null;
-        const statusEntityValue = attrs.manual_sp ?? null;
-        
-        if (numberEntityValue !== null && Math.abs(numberEntityValue - savedValue) < 0.01) {
-          if (statusEntityValue !== null && Math.abs(statusEntityValue - savedValue) < 0.01) {
-            this._savedFields.delete("manual_sp");
-          }
-        }
-      } else {
-        const numberEntityId = this._findEntityId("number", "manual_sp_value");
-        const numberEntityState = this.hass?.states[numberEntityId];
-        const entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : (attrs.manual_sp ?? null);
-        const currentValue = this._data.manual_sp ?? null;
-        if (Math.abs((entityValue ?? 0) - (currentValue ?? 0)) > 0.01) {
-          this._data.manual_sp = entityValue;
-          hasChanges = true;
-        }
-      }
-    }
-    
-    if (!this._editingFields.has("manual_out")) {
-      const savedTime = this._savedFields.get("manual_out");
-      if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
-        const numberEntityId = this._findEntityId("number", "manual_out_value");
-        const numberEntityState = this.hass?.states[numberEntityId];
-        const numberEntityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
-        const savedValue = this._data.manual_out ?? null;
-        const statusEntityValue = attrs.manual_out ?? null;
-        
-        if (numberEntityValue !== null && Math.abs(numberEntityValue - savedValue) < 0.01) {
-          if (statusEntityValue !== null && Math.abs(statusEntityValue - savedValue) < 0.01) {
-            this._savedFields.delete("manual_out");
-          }
-        }
-      } else {
-        const numberEntityId = this._findEntityId("number", "manual_out_value");
-        const numberEntityState = this.hass?.states[numberEntityId];
-        const entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : (attrs.manual_out ?? null);
-        const currentValue = this._data.manual_out ?? null;
-        if (Math.abs((entityValue ?? 0) - (currentValue ?? 0)) > 0.01) {
-          this._data.manual_out = entityValue;
-          hasChanges = true;
-        }
-      }
-    }
-    
-    const editableFields = ['deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode'];
+    const editableFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode'];
     for (const field of editableFields) {
       if (this._editingFields.has(field)) continue;
       
@@ -271,8 +215,10 @@ class PIDControllerPopup extends LitElement {
           entityValue = attrs.enabled ?? false;
         } else if (field === 'runtime_mode') {
           entityValue = attrs.runtime_mode || "AUTO_SP";
-        } else {
-          entityValue = attrs[field] ?? null;
+        } else if (field === 'manual_sp' || field === 'manual_out') {
+          const numberEntityId = this._findEntityId("number", field === 'manual_sp' ? "manual_sp_value" : "manual_out_value");
+          const numberEntityState = this.hass?.states[numberEntityId];
+          entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : (attrs[field] ?? null);
         }
         
         const savedValue = this._data[field];
@@ -291,8 +237,10 @@ class PIDControllerPopup extends LitElement {
         entityValue = attrs.enabled ?? false;
       } else if (field === 'runtime_mode') {
         entityValue = attrs.runtime_mode || "AUTO_SP";
-      } else {
-        entityValue = attrs[field] ?? null;
+      } else if (field === 'manual_sp' || field === 'manual_out') {
+        const numberEntityId = this._findEntityId("number", field === 'manual_sp' ? "manual_sp_value" : "manual_out_value");
+        const numberEntityState = this.hass?.states[numberEntityId];
+        entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : (attrs[field] ?? null);
       }
       
       const currentValue = this._data[field];
@@ -346,7 +294,6 @@ class PIDControllerPopup extends LitElement {
 
   _updateData() {
     if (!this.hass || !this.config) return;
-    // Don't update data while user is actively editing any field
     if (this._editingFields.size > 0) return;
 
     const state = this.hass.states[this.config.pid_entity];
@@ -385,9 +332,7 @@ class PIDControllerPopup extends LitElement {
       
       const numberFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output'];
       for (const field of numberFields) {
-        // If field is being edited, preserve the edited value at all costs
         if (this._editingFields.has(field)) {
-          // Use edited value if it exists, otherwise keep current data value
           data[field] = this._edited[field] !== undefined ? this._edited[field] : this._data[field];
           continue;
         }
@@ -540,9 +485,17 @@ class PIDControllerPopup extends LitElement {
   }
 
   _onModeChanged(ev) {
-    ev.stopPropagation();
-    ev.preventDefault();
-    const value = ev.detail?.value || ev.target.value;
+    if (ev) {
+      ev.stopPropagation();
+      ev.preventDefault();
+      if (ev.stopImmediatePropagation) {
+        ev.stopImmediatePropagation();
+      }
+    }
+    
+    const value = ev.detail?.value || ev.target?.value || ev.target?.selected?.value;
+    if (!value) return;
+    
     this._edited.runtime_mode = value;
     this._save();
     this.requestUpdate();
@@ -550,14 +503,9 @@ class PIDControllerPopup extends LitElement {
 
   _onNumberChanged(key, ev) {
     const inputValue = ev.target.value;
-    
-    // Always add to editing fields when user is typing
     this._editingFields.add(key);
     
-    // Store the raw input value temporarily to allow partial input (e.g., "-", ".")
     if (inputValue === "" || inputValue === "-" || inputValue === "." || inputValue === "-.") {
-      // Allow empty, minus sign, or decimal point while typing
-      // Don't set _edited to undefined, keep the previous value or use null
       this._edited[key] = null;
       this._data[key] = null;
     } else {
@@ -566,24 +514,19 @@ class PIDControllerPopup extends LitElement {
         this._edited[key] = value;
         this._data[key] = value;
       } else {
-        // Invalid input - restore previous value
         const prevValue = this._getValue(key);
         ev.target.value = prevValue !== null && prevValue !== undefined ? String(prevValue) : "";
         return;
       }
     }
     
-    // Force immediate update to show the typed value
     this.requestUpdate();
   }
 
   async _onNumberBlur(key, ev) {
-    // Don't remove from editing fields until after save completes
-    // This prevents race conditions where updates might overwrite the value
     if (this._edited[key] !== undefined) {
       await this._save();
     }
-    // Remove from editing fields after save completes
     this._editingFields.delete(key);
     this.requestUpdate();
   }
@@ -605,18 +548,9 @@ class PIDControllerPopup extends LitElement {
     const statusEntity = this.config.pid_entity;
     const deviceName = statusEntity.replace(/^sensor\./, "").replace(/_status$/, "");
     
-    // Map suffix to actual entity name (entity names are converted to lowercase with underscores)
     const suffixMap = {
-      "manual_sp_value": "manual_sp",  // "Manual SP" -> "manual_sp"
-      "manual_out_value": "manual_out", // "Manual OUT" -> "manual_out"
-      "pid_deadband": "pid_deadband",
-      "kp": "kp",
-      "ki": "ki",
-      "kd": "kd",
-      "min_output": "min_output",
-      "max_output": "max_output",
-      "enabled": "enabled",
-      "runtime_mode": "runtime_mode",
+      "manual_sp_value": "manual_sp",
+      "manual_out_value": "manual_out",
     };
     
     const entityName = suffixMap[suffix] || suffix;
@@ -626,24 +560,13 @@ class PIDControllerPopup extends LitElement {
       return candidateId;
     }
     
-    // Try alternative patterns
     const prefix = `${domain}.${deviceName}`;
     for (const entityId in this.hass.states) {
-      if (entityId.startsWith(prefix)) {
-        // Check if it ends with the entity name
-        if (entityId.endsWith(`_${entityName}`) || entityId.endsWith(`_${suffix}`)) {
-          return entityId;
-        }
-        // Also check for exact match on the suffix part
-        const entityPart = entityId.replace(`${prefix}_`, "");
-        if (entityPart === entityName || entityPart === suffix) {
-          return entityId;
-        }
+      if (entityId.startsWith(prefix) && (entityId.endsWith(`_${entityName}`) || entityId.endsWith(`_${suffix}`))) {
+        return entityId;
       }
     }
     
-    // Fallback: return the candidate ID even if not found (will cause error but helps debug)
-    console.warn(`Entity not found: ${candidateId}, tried suffix: ${suffix}, entityName: ${entityName}`);
     return candidateId;
   }
 
@@ -695,52 +618,12 @@ class PIDControllerPopup extends LitElement {
               value: patch[key],
             });
             
-            // Wait for service call to complete
             await new Promise(resolve => setTimeout(resolve, 200));
             
             this._data[key] = patch[key];
             this._savedFields.set(key, now);
             delete this._edited[key];
-            
-            // For manual_sp, wait for coordinator to refresh and update effective_sp
-            // Poll for up to 3 seconds to catch the updated effective_sp
-            if (key === "manual_sp") {
-              const expectedSp = patch[key];
-              let attempts = 0;
-              const maxAttempts = 15; // 15 attempts * 200ms = 3 seconds
-              
-              while (attempts < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-                this._updateReadOnlyValues();
-                
-                const currentSp = this._data.effective_sp;
-                if (currentSp !== null && Math.abs(currentSp - expectedSp) < 0.1) {
-                  break; // effective_sp has updated to match manual_sp
-                }
-                attempts++;
-              }
-            }
-            
-            // For manual_out, wait for coordinator to refresh and update output
-            // Poll for up to 3 seconds to catch the updated output
-            if (key === "manual_out") {
-              const expectedOut = patch[key];
-              let attempts = 0;
-              const maxAttempts = 15; // 15 attempts * 200ms = 3 seconds
-              
-              while (attempts < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-                this._updateReadOnlyValues();
-                
-                const currentOut = this._data.output;
-                if (currentOut !== null && Math.abs(currentOut - expectedOut) < 0.1) {
-                  break; // output has updated to match manual_out
-                }
-                attempts++;
-              }
-            }
           } catch (err) {
-            console.error(`Error saving ${key} to ${entityId}:`, err);
             alert(`Error saving ${key}: ${err.message || err}`);
             throw err;
           }
@@ -750,7 +633,6 @@ class PIDControllerPopup extends LitElement {
       this._edited = {};
       this.requestUpdate();
     } catch (err) {
-      console.error("Error saving PID settings:", err);
       if (!err.message || !err.message.includes("Error saving")) {
         alert(`Error saving: ${err.message || err}`);
       }
@@ -814,7 +696,12 @@ class PIDControllerPopup extends LitElement {
               <div class="control-label">Runtime Mode</div>
               <ha-select
                 .value=${runtime_mode || ""}
-                @selected=${this._onModeChanged}
+                @selected=${(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  this._onModeChanged(e);
+                }}
+                @closed=${(e) => e.stopPropagation()}
               >
                 ${runtime_modes.map(
                   (mode) =>

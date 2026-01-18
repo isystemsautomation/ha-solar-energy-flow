@@ -17,7 +17,6 @@ class PIDControllerPopup extends LitElement {
     ha-card {
       padding: 16px;
     }
-    
 
     .header {
       margin-bottom: 24px;
@@ -33,7 +32,6 @@ class PIDControllerPopup extends LitElement {
       font-weight: 500;
       color: var(--primary-text-color);
     }
-
 
     .section {
       margin-bottom: 24px;
@@ -238,17 +236,23 @@ class PIDControllerPopup extends LitElement {
     const isManualOutMode = runtimeMode === "MANUAL_OUT";
     const isManualSpMode = runtimeMode === "MANUAL_SP";
     
-    const editableFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode'];
+    const editableFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode', 'grid_limiter_enabled', 'rate_limiter_enabled', 'grid_limiter_limit', 'rate_limit'];
     for (const field of editableFields) {
       if (this._editingFields.has(field)) continue;
       
       const savedTime = this._savedFields.get(field);
       if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
         let entityValue = attrs[field];
-        if (field === 'enabled') {
-          entityValue = attrs.enabled ?? false;
+        if (field === 'enabled' || field === 'grid_limiter_enabled' || field === 'rate_limiter_enabled') {
+          const switchEntityId = this._findEntityId("switch", field === 'enabled' ? "enabled" : field === 'grid_limiter_enabled' ? "grid_limiter" : "rate_limiter");
+          const switchEntityState = this.hass?.states[switchEntityId];
+          entityValue = switchEntityState?.state === "on";
         } else if (field === 'runtime_mode') {
           entityValue = attrs.runtime_mode || "AUTO_SP";
+        } else if (field === 'grid_limiter_limit' || field === 'rate_limit') {
+          const numberEntityId = this._findEntityId("number", field === 'grid_limiter_limit' ? "grid_limiter_limit" : "rate_limit");
+          const numberEntityState = this.hass?.states[numberEntityId];
+          entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
         } else if (field === 'manual_sp') {
           if (isManualSpMode) {
             const numberEntityId = this._findEntityId("number", "manual_sp_value");
@@ -268,7 +272,7 @@ class PIDControllerPopup extends LitElement {
         }
         
         const savedValue = this._data[field];
-        const matches = (field === 'enabled' || field === 'runtime_mode') 
+        const matches = (field === 'enabled' || field === 'runtime_mode' || field === 'grid_limiter_enabled' || field === 'rate_limiter_enabled') 
           ? entityValue === savedValue
           : Math.abs((entityValue ?? 0) - (savedValue ?? 0)) < 0.01;
         
@@ -279,10 +283,16 @@ class PIDControllerPopup extends LitElement {
       }
       
       let entityValue = attrs[field];
-      if (field === 'enabled') {
-        entityValue = attrs.enabled ?? false;
+      if (field === 'enabled' || field === 'grid_limiter_enabled' || field === 'rate_limiter_enabled') {
+        const switchEntityId = this._findEntityId("switch", field === 'enabled' ? "enabled" : field === 'grid_limiter_enabled' ? "grid_limiter" : "rate_limiter");
+        const switchEntityState = this.hass?.states[switchEntityId];
+        entityValue = switchEntityState?.state === "on";
       } else if (field === 'runtime_mode') {
         entityValue = attrs.runtime_mode || "AUTO_SP";
+      } else if (field === 'grid_limiter_limit' || field === 'rate_limit') {
+        const numberEntityId = this._findEntityId("number", field === 'grid_limiter_limit' ? "grid_limiter_limit" : "rate_limit");
+        const numberEntityState = this.hass?.states[numberEntityId];
+        entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
       } else if (field === 'manual_sp') {
         if (isManualSpMode) {
           const numberEntityId = this._findEntityId("number", "manual_sp_value");
@@ -302,7 +312,7 @@ class PIDControllerPopup extends LitElement {
       }
       
       const currentValue = this._data[field];
-      if (field === 'enabled' || field === 'runtime_mode') {
+      if (field === 'enabled' || field === 'runtime_mode' || field === 'grid_limiter_enabled' || field === 'rate_limiter_enabled') {
         if (entityValue !== currentValue) {
           this._data[field] = entityValue;
           hasChanges = true;
@@ -389,7 +399,23 @@ class PIDControllerPopup extends LitElement {
         data.runtime_mode = this._data.runtime_mode ?? (attrs.runtime_mode || "AUTO_SP");
       }
       
-      const numberFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output'];
+      if (this._edited.grid_limiter_enabled === undefined) {
+        const switchEntityId = this._findEntityId("switch", "grid_limiter");
+        const switchEntityState = this.hass?.states[switchEntityId];
+        data.grid_limiter_enabled = switchEntityState?.state === "on";
+      } else {
+        data.grid_limiter_enabled = this._data.grid_limiter_enabled ?? false;
+      }
+      
+      if (this._edited.rate_limiter_enabled === undefined) {
+        const switchEntityId = this._findEntityId("switch", "rate_limiter");
+        const switchEntityState = this.hass?.states[switchEntityId];
+        data.rate_limiter_enabled = switchEntityState?.state === "on";
+      } else {
+        data.rate_limiter_enabled = this._data.rate_limiter_enabled ?? false;
+      }
+      
+      const numberFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'grid_limiter_limit', 'rate_limit'];
       for (const field of numberFields) {
         if (this._editingFields.has(field)) {
           data[field] = this._edited[field] !== undefined ? this._edited[field] : this._data[field];
@@ -401,7 +427,12 @@ class PIDControllerPopup extends LitElement {
         } else {
           const savedTime = this._savedFields.get(field);
           if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
-            const entityValue = attrs[field] ?? null;
+            let entityValue = attrs[field] ?? null;
+            if (field === 'grid_limiter_limit' || field === 'rate_limit') {
+              const numberEntityId = this._findEntityId("number", field === 'grid_limiter_limit' ? "grid_limiter_limit" : "rate_limit");
+              const numberEntityState = this.hass?.states[numberEntityId];
+              entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
+            }
             const savedValue = this._data[field] ?? null;
             if (Math.abs((entityValue ?? 0) - (savedValue ?? 0)) < 0.01) {
               data[field] = entityValue;
@@ -410,7 +441,13 @@ class PIDControllerPopup extends LitElement {
               data[field] = savedValue;
             }
           } else {
-            data[field] = attrs[field] ?? null;
+            if (field === 'grid_limiter_limit' || field === 'rate_limit') {
+              const numberEntityId = this._findEntityId("number", field === 'grid_limiter_limit' ? "grid_limiter_limit" : "rate_limit");
+              const numberEntityState = this.hass?.states[numberEntityId];
+              data[field] = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
+            } else {
+              data[field] = attrs[field] ?? null;
+            }
             if (savedTime) {
               this._savedFields.delete(field);
             }
@@ -539,14 +576,22 @@ class PIDControllerPopup extends LitElement {
     this.requestUpdate();
   }
 
+  _onGridLimiterChanged(ev) {
+    this._edited.grid_limiter_enabled = ev.target.checked;
+    this._save();
+    this.requestUpdate();
+  }
+
+  _onRateLimiterChanged(ev) {
+    this._edited.rate_limiter_enabled = ev.target.checked;
+    this._save();
+    this.requestUpdate();
+  }
+
   _onModeChanged(ev) {
-    if (ev) {
-      ev.stopPropagation();
-      ev.preventDefault();
-      if (ev.stopImmediatePropagation) {
-        ev.stopImmediatePropagation();
-      }
-    }
+    ev.stopPropagation();
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
     
     const value = ev.detail?.value || ev.target?.value || ev.target?.selected?.value;
     if (!value) return;
@@ -606,6 +651,8 @@ class PIDControllerPopup extends LitElement {
     const suffixMap = {
       "manual_sp_value": "manual_sp",
       "manual_out_value": "manual_out",
+      "grid_limiter_limit": "grid_limiter_limit",
+      "rate_limit": "rate_limit",
     };
     
     const entityName = suffixMap[suffix] || suffix;
@@ -638,6 +685,8 @@ class PIDControllerPopup extends LitElement {
       max_output: "max_output",
       manual_out: "manual_out_value",
       manual_sp: "manual_sp_value",
+      grid_limiter_limit: "grid_limiter_limit",
+      rate_limit: "rate_limit",
     };
     
     try {
@@ -662,6 +711,26 @@ class PIDControllerPopup extends LitElement {
         this._data.runtime_mode = patch.runtime_mode;
         this._savedFields.set("runtime_mode", now);
         delete patch.runtime_mode;
+      }
+      
+      if (patch.grid_limiter_enabled !== undefined) {
+        const entityId = this._findEntityId("switch", "grid_limiter");
+        await this.hass.callService("switch", patch.grid_limiter_enabled ? "turn_on" : "turn_off", {
+          entity_id: entityId,
+        });
+        this._data.grid_limiter_enabled = patch.grid_limiter_enabled;
+        this._savedFields.set("grid_limiter_enabled", now);
+        delete patch.grid_limiter_enabled;
+      }
+      
+      if (patch.rate_limiter_enabled !== undefined) {
+        const entityId = this._findEntityId("switch", "rate_limiter");
+        await this.hass.callService("switch", patch.rate_limiter_enabled ? "turn_on" : "turn_off", {
+          entity_id: entityId,
+        });
+        this._data.rate_limiter_enabled = patch.rate_limiter_enabled;
+        this._savedFields.set("rate_limiter_enabled", now);
+        delete patch.rate_limiter_enabled;
       }
       
       for (const [key, entitySuffix] of Object.entries(numberMappings)) {
@@ -699,12 +768,7 @@ class PIDControllerPopup extends LitElement {
     this.requestUpdate();
   }
 
-  _close(ev) {
-    if (ev) {
-      ev.stopPropagation();
-      ev.preventDefault();
-    }
-    
+  _close() {
     const dialog = this.closest("ha-dialog");
     if (dialog) {
       dialog.close();
@@ -938,6 +1002,10 @@ class PIDControllerPopup extends LitElement {
     const kd = this._getValue("kd");
     const max_output = this._getValue("max_output");
     const min_output = this._getValue("min_output");
+    const grid_limiter_enabled = this._getValue("grid_limiter_enabled");
+    const rate_limiter_enabled = this._getValue("rate_limiter_enabled");
+    const grid_limiter_limit = this._getValue("grid_limiter_limit");
+    const rate_limit = this._getValue("rate_limit");
     const runtime_modes = this._data.runtime_modes || [];
 
     return html`
@@ -1098,6 +1166,49 @@ class PIDControllerPopup extends LitElement {
                 .value=${max_output ?? ""}
                 @input=${(e) => this._onNumberChanged("max_output", e)}
                 @blur=${(e) => this._onNumberBlur("max_output", e)}
+                placeholder="—"
+              ></ha-textfield>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Limiters</div>
+          <div class="grid grid-2">
+            <div class="control-row">
+              <div class="control-label">Grid Limiter</div>
+              <ha-switch
+                .checked=${grid_limiter_enabled}
+                @change=${this._onGridLimiterChanged}
+              ></ha-switch>
+            </div>
+
+            <div class="control-row">
+              <div class="control-label">Grid Limiter Limit</div>
+              <ha-textfield
+                type="number"
+                .value=${grid_limiter_limit ?? ""}
+                @input=${(e) => this._onNumberChanged("grid_limiter_limit", e)}
+                @blur=${(e) => this._onNumberBlur("grid_limiter_limit", e)}
+                placeholder="—"
+              ></ha-textfield>
+            </div>
+
+            <div class="control-row">
+              <div class="control-label">Rate Limiter</div>
+              <ha-switch
+                .checked=${rate_limiter_enabled}
+                @change=${this._onRateLimiterChanged}
+              ></ha-switch>
+            </div>
+
+            <div class="control-row">
+              <div class="control-label">Rate Limit</div>
+              <ha-textfield
+                type="number"
+                .value=${rate_limit ?? ""}
+                @input=${(e) => this._onNumberChanged("rate_limit", e)}
+                @blur=${(e) => this._onNumberBlur("rate_limit", e)}
                 placeholder="—"
               ></ha-textfield>
             </div>

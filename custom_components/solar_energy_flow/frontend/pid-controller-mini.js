@@ -277,9 +277,7 @@ class PIDControllerMini extends LitElement {
       const entityList = `${entityIds.pv},${entityIds.sp},${entityIds.output}`;
       const url = `history/period/${startTime.toISOString()}?filter_entity_id=${encodeURIComponent(entityList)}&minimal_response=false&significant_changes_only=false`;
       
-      console.log("PID Mini: Fetching history for entities:", entityIds);
       const history = await this.hass.callApi("GET", url);
-      console.log("PID Mini: History response:", history?.length, "entity histories");
 
       if (!history || !Array.isArray(history)) {
         throw new Error("Invalid history data format");
@@ -355,7 +353,6 @@ class PIDControllerMini extends LitElement {
     }
     
     if (data.pv.length === 0 && data.sp.length > 0) {
-      console.warn("PID Mini: No PV data found. Expected entity:", entityIds.pv);
     }
 
     if (allTimes.size === 0) {
@@ -415,7 +412,6 @@ class PIDControllerMini extends LitElement {
 
     Object.keys(colors).forEach((key) => {
       if (data[key].length === 0) {
-        console.warn(`PID Mini: No data points for ${key.toUpperCase()}`);
         return;
       }
 
@@ -554,45 +550,23 @@ class PIDControllerMini extends LitElement {
       const shadowRoot = dialog.shadowRoot;
       if (!shadowRoot) return;
       
-      const allElements = shadowRoot.querySelectorAll("*");
-      let header = null;
-      let title = null;
+      const header = shadowRoot.querySelector(".mdc-dialog__header") || 
+                     shadowRoot.querySelector("h2")?.parentElement;
       
-      for (const el of allElements) {
-        if (el.classList?.contains("mdc-dialog__header") || 
-            el.classList?.contains("mdc-dialog__title") ||
-            (el.tagName === "H2" && el.textContent?.includes("pid"))) {
-          header = el.classList?.contains("mdc-dialog__header") ? el : el.parentElement;
-          title = el.tagName === "H2" || el.classList?.contains("mdc-dialog__title") ? el : el.querySelector("h2") || el.querySelector(".mdc-dialog__title");
-          break;
-        }
-      }
-      
-      if (!header) {
-        const h2 = shadowRoot.querySelector("h2");
-        if (h2) {
-          header = h2.parentElement;
-          title = h2;
-        }
-      }
-      
-      if (header && title) {
+      if (header && !header.querySelector("mwc-icon-button")) {
         header.style.position = "relative";
         header.style.display = "flex";
         header.style.alignItems = "center";
+        header.style.paddingLeft = "56px";
         
-        if (!header.querySelector("mwc-icon-button")) {
-          header.style.paddingLeft = "56px";
-          
-          const closeButton = document.createElement("mwc-icon-button");
-          closeButton.style.cssText = "position: absolute; left: 8px; top: 50%; transform: translateY(-50%); --mdc-icon-button-size: 40px; --mdc-icon-size: 24px; z-index: 10; color: var(--primary-text-color);";
-          const closeIcon = document.createElement("ha-icon");
-          closeIcon.setAttribute("icon", "mdi:close");
-          closeButton.appendChild(closeIcon);
-          closeButton.addEventListener("click", () => dialog.close());
-          
-          header.insertBefore(closeButton, header.firstChild);
-        }
+        const closeButton = document.createElement("mwc-icon-button");
+        closeButton.style.cssText = "position: absolute; left: 8px; top: 50%; transform: translateY(-50%); --mdc-icon-button-size: 40px; --mdc-icon-size: 24px; z-index: 10; color: var(--primary-text-color);";
+        const closeIcon = document.createElement("ha-icon");
+        closeIcon.setAttribute("icon", "mdi:close");
+        closeButton.appendChild(closeIcon);
+        closeButton.addEventListener("click", () => dialog.close());
+        
+        header.insertBefore(closeButton, header.firstChild);
       }
     }, 500);
   }

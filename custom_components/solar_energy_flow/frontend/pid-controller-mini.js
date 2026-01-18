@@ -101,6 +101,29 @@ class PIDControllerMini extends LitElement {
     };
   }
 
+  static getConfigForm() {
+    return {
+      schema: [
+        {
+          name: "pid_entity",
+          selector: {
+            entity: {
+              domain: "sensor",
+            },
+          },
+          required: true,
+        },
+        {
+          name: "title",
+          selector: {
+            text: {},
+          },
+          default: "PID Controller",
+        },
+      ],
+    };
+  }
+
   getCardSize() {
     return 3;
   }
@@ -236,90 +259,12 @@ class PIDControllerMini extends LitElement {
 
 customElements.define("pid-controller-mini", PIDControllerMini);
 
-// Visual editor for the card
-class PIDControllerMiniEditor extends LitElement {
-  static properties = {
-    hass: { type: Object },
-    config: { type: Object },
-  };
-
-  setConfig(config) {
-    this.config = { ...config };
-  }
-
-  static getStubConfig() {
-    return {
-      type: "custom:pid-controller-mini",
-      pid_entity: "",
-      title: "PID Controller",
-    };
-  }
-
-  _valueChanged(ev) {
-    if (!this.config) {
-      return;
-    }
-    const target = ev.target;
-    const value = target.value || target.configValue;
-    const name = target.name || target.configValue;
-    
-    if (this.config[name] === value) {
-      return;
-    }
-    
-    this.config = { ...this.config, [name]: value };
-    this.configChanged();
-  }
-
-  configChanged() {
-    const event = new CustomEvent("config-changed", {
-      detail: { config: this.config },
-      bubbles: true,
-      composed: true,
-    });
-    this.dispatchEvent(event);
-  }
-
-  render() {
-    if (!this.hass) {
-      return html``;
-    }
-
-    return html`
-      <div class="card-config">
-        <ha-entity-picker
-          .hass=${this.hass}
-          .value=${this.config?.pid_entity || ""}
-          .label=${"PID Entity (Status Sensor)"}
-          .required=${true}
-          .includeDomains=${["sensor"]}
-          @value-changed=${(ev) => {
-            this.config = { ...this.config, pid_entity: ev.detail.value };
-            this.configChanged();
-          }}
-        ></ha-entity-picker>
-        <ha-textfield
-          .label=${"Title (optional)"}
-          .value=${this.config?.title || "PID Controller"}
-          @input=${(ev) => {
-            this.config = { ...this.config, title: ev.target.value };
-            this.configChanged();
-          }}
-        ></ha-textfield>
-      </div>
-    `;
-  }
-}
-
-customElements.define("pid-controller-mini-editor", PIDControllerMiniEditor);
-
-// Register the card with visual editor support
+// Register the card
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "pid-controller-mini",
   name: "PID Controller Mini",
   description: "Compact dashboard card for PID controller with popup editor",
   preview: false,
-  getConfigElement: () => document.createElement("pid-controller-mini-editor"),
 });
 

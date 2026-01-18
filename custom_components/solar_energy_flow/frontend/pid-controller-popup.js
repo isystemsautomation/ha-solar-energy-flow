@@ -194,6 +194,7 @@ class PIDControllerPopup extends LitElement {
 
   _checkEntityStateChanges() {
     if (!this.hass || !this.config) return;
+    if (this._editingFields.size > 0) return; // Don't update while user is editing any field
     
     const state = this.hass.states[this.config.pid_entity];
     if (!state?.attributes) return;
@@ -298,7 +299,9 @@ class PIDControllerPopup extends LitElement {
 
   updated(changedProperties) {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
-      this._updateData();
+      if (this._editingFields.size === 0) {
+        this._updateData();
+      }
       if (this.hass && this.config) {
         if (!this._updateInterval) {
           this._startLiveUpdates();
@@ -306,7 +309,7 @@ class PIDControllerPopup extends LitElement {
         this._updateReadOnlyValues();
       }
     }
-    if (changedProperties.has("hass")) {
+    if (changedProperties.has("hass") && this._editingFields.size === 0) {
       this._updateReadOnlyValues();
       this._checkEntityStateChanges();
     }
@@ -505,6 +508,12 @@ class PIDControllerPopup extends LitElement {
       this._edited[key] = value;
       this._editingFields.add(key);
       this._data[key] = value;
+      this.requestUpdate();
+    } else if (ev.target.value === "" || ev.target.value === "-") {
+      // Allow empty or minus sign while typing
+      this._edited[key] = undefined;
+      this._editingFields.add(key);
+      this._data[key] = null;
       this.requestUpdate();
     } else {
       delete this._edited[key];

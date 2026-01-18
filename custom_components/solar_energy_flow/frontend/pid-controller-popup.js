@@ -231,7 +231,33 @@ class PIDControllerPopup extends LitElement {
       }
     }
     
-    const editableFields = ['manual_out', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode'];
+    if (!this._editingFields.has("manual_out")) {
+      const savedTime = this._savedFields.get("manual_out");
+      if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
+        const numberEntityId = this._findEntityId("number", "manual_out_value");
+        const numberEntityState = this.hass?.states[numberEntityId];
+        const numberEntityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
+        const savedValue = this._data.manual_out ?? null;
+        const statusEntityValue = attrs.manual_out ?? null;
+        
+        if (numberEntityValue !== null && Math.abs(numberEntityValue - savedValue) < 0.01) {
+          if (statusEntityValue !== null && Math.abs(statusEntityValue - savedValue) < 0.01) {
+            this._savedFields.delete("manual_out");
+          }
+        }
+      } else {
+        const numberEntityId = this._findEntityId("number", "manual_out_value");
+        const numberEntityState = this.hass?.states[numberEntityId];
+        const entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : (attrs.manual_out ?? null);
+        const currentValue = this._data.manual_out ?? null;
+        if (Math.abs((entityValue ?? 0) - (currentValue ?? 0)) > 0.01) {
+          this._data.manual_out = entityValue;
+          hasChanges = true;
+        }
+      }
+    }
+    
+    const editableFields = ['deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode'];
     for (const field of editableFields) {
       if (this._editingFields.has(field)) continue;
       
@@ -300,7 +326,7 @@ class PIDControllerPopup extends LitElement {
   updated(changedProperties) {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
       if (this._editingFields.size === 0) {
-        this._updateData();
+      this._updateData();
       }
       if (this.hass && this.config) {
         if (!this._updateInterval) {
@@ -609,11 +635,50 @@ class PIDControllerPopup extends LitElement {
               value: patch[key],
             });
             
+            // Wait for service call to complete
             await new Promise(resolve => setTimeout(resolve, 200));
             
             this._data[key] = patch[key];
             this._savedFields.set(key, now);
             delete this._edited[key];
+            
+            // For manual_sp, wait for coordinator to refresh and update effective_sp
+            // Poll for up to 3 seconds to catch the updated effective_sp
+            if (key === "manual_sp") {
+              const expectedSp = patch[key];
+              let attempts = 0;
+              const maxAttempts = 15; // 15 attempts * 200ms = 3 seconds
+              
+              while (attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+                this._updateReadOnlyValues();
+                
+                const currentSp = this._data.effective_sp;
+                if (currentSp !== null && Math.abs(currentSp - expectedSp) < 0.1) {
+                  break; // effective_sp has updated to match manual_sp
+                }
+                attempts++;
+              }
+            }
+            
+            // For manual_out, wait for coordinator to refresh and update output
+            // Poll for up to 3 seconds to catch the updated output
+            if (key === "manual_out") {
+              const expectedOut = patch[key];
+              let attempts = 0;
+              const maxAttempts = 15; // 15 attempts * 200ms = 3 seconds
+              
+              while (attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+                this._updateReadOnlyValues();
+                
+                const currentOut = this._data.output;
+                if (currentOut !== null && Math.abs(currentOut - expectedOut) < 0.1) {
+                  break; // output has updated to match manual_out
+                }
+                attempts++;
+              }
+            }
           } catch (err) {
             console.error(`Error saving ${key} to ${entityId}:`, err);
             alert(`Error saving ${key}: ${err.message || err}`);

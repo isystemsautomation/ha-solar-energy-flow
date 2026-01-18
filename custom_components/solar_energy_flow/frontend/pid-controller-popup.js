@@ -666,15 +666,44 @@ class PIDControllerPopup extends LitElement {
             console.log(`Saved ${key} = ${patch[key]} to ${entityId}, marked as saved at ${now}, will protect for 10 seconds`);
             
             // If this is manual_sp, the effective_sp will update after coordinator refresh
-            // Force an immediate read-only values update after a short delay to catch the update
+            // The coordinator needs to recalculate the setpoint, which happens on its next update cycle
+            // The number entity's async_set_native_value should trigger coordinator.async_request_refresh()
+            // but there might be a delay, so we'll keep checking
             if (key === "manual_sp") {
-              setTimeout(() => {
+              const expectedSP = patch[key];
+              console.log(`Waiting for effective_sp to update to ${expectedSP}...`);
+              
+              // Update immediately
+              this._updateReadOnlyValues();
+              
+              // Check if effective_sp has updated to match our saved manual_sp
+              const checkSPUpdate = () => {
+                const state = this.hass?.states[this.config?.pid_entity];
+                const currentSP = state?.attributes?.effective_sp;
+                if (currentSP !== null && currentSP !== undefined) {
+                  const spDiff = Math.abs(currentSP - expectedSP);
+                  if (spDiff < 0.1) {
+                    console.log(`✓ effective_sp updated to ${currentSP} (expected ${expectedSP})`);
+                    this._updateReadOnlyValues();
+                    return true; // Found the update
+                  }
+                }
+                return false; // Not updated yet
+              };
+              
+              // Check at intervals
+              let checkCount = 0;
+              const maxChecks = 15; // Check for up to 15 seconds
+              const checkInterval = setInterval(() => {
+                checkCount++;
                 this._updateReadOnlyValues();
-              }, 500);
-              // Also schedule another update after coordinator typically refreshes (usually 1-2 seconds)
-              setTimeout(() => {
-                this._updateReadOnlyValues();
-              }, 2000);
+                if (checkSPUpdate() || checkCount >= maxChecks) {
+                  clearInterval(checkInterval);
+                  if (checkCount >= maxChecks) {
+                    console.warn(`effective_sp did not update to ${expectedSP} after ${maxChecks} checks`);
+                  }
+                }
+              }, 1000); // Check every second
             }
           } catch (err) {
             console.error(`Error saving ${key} to ${entityId}:`, err);

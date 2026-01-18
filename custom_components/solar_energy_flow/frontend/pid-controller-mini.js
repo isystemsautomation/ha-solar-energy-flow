@@ -14,6 +14,11 @@ class PIDControllerMini extends LitElement {
 
     ha-card {
       padding: 16px;
+      cursor: pointer;
+    }
+
+    ha-card:hover {
+      box-shadow: var(--ha-card-box-shadow, 0 2px 2px 0 rgba(0, 0, 0, 0.14), 0 1px 5px 0 rgba(0, 0, 0, 0.12), 0 3px 1px -2px rgba(0, 0, 0, 0.2));
     }
 
     .header {
@@ -167,7 +172,12 @@ class PIDControllerMini extends LitElement {
     return mode.replace(/_/g, " ");
   }
 
-  _openPopup() {
+  _openPopup(ev) {
+    // Prevent event bubbling if clicking the button
+    if (ev) {
+      ev.stopPropagation();
+    }
+
     // Use browser_mod if available
     if (
       this.hass.services["browser_mod"] &&
@@ -184,16 +194,25 @@ class PIDControllerMini extends LitElement {
       return;
     }
 
-    // Fallback: open more-info dialog
-    this.dispatchEvent(
-      new CustomEvent("hass-more-info", {
-        bubbles: true,
-        composed: true,
-        detail: {
-          entityId: this.config.pid_entity,
-        },
-      })
-    );
+    // Fallback: Create a modal dialog with the popup card
+    const dialog = document.createElement("ha-dialog");
+    dialog.heading = this.config.title || "PID Controller";
+    dialog.hideActions = false;
+    
+    const popupCard = document.createElement("pid-controller-popup");
+    popupCard.hass = this.hass;
+    popupCard.config = {
+      pid_entity: this.config.pid_entity,
+    };
+    
+    dialog.appendChild(popupCard);
+    
+    dialog.addEventListener("closed", () => {
+      document.body.removeChild(dialog);
+    });
+    
+    document.body.appendChild(dialog);
+    dialog.show();
   }
 
   render() {
@@ -206,7 +225,7 @@ class PIDControllerMini extends LitElement {
       d.status === "running" ? "running" : d.enabled === false ? "disabled" : "";
 
     return html`
-      <ha-card>
+      <ha-card @click=${this._openPopup}>
         <div class="header">
           <div class="title">${this.config.title}</div>
         </div>

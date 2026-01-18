@@ -122,6 +122,13 @@ class PIDControllerPopup extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    this._startLiveUpdates();
+  }
+
+  _startLiveUpdates() {
+    if (this._updateInterval) {
+      clearInterval(this._updateInterval);
+    }
     this._updateInterval = setInterval(() => {
       if (this.hass && this.config) {
         this._updateReadOnlyValues();
@@ -155,8 +162,10 @@ class PIDControllerPopup extends LitElement {
   updated(changedProperties) {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
       this._updateData();
+      if (this.hass && this.config && !this._updateInterval) {
+        this._startLiveUpdates();
+      }
     }
-    // Also trigger live updates when hass state changes
     if (changedProperties.has("hass")) {
       this._updateReadOnlyValues();
     }
@@ -312,10 +321,10 @@ class PIDControllerPopup extends LitElement {
     }
   }
 
-  _onNumberBlur(key, ev) {
+  async _onNumberBlur(key, ev) {
     this._editingFields.delete(key);
     if (this._edited[key] !== undefined) {
-      this._save();
+      await this._save();
     }
     this.requestUpdate();
   }
@@ -374,12 +383,18 @@ class PIDControllerPopup extends LitElement {
       
       for (const [key, entitySuffix] of Object.entries(numberMappings)) {
         if (patch[key] !== undefined) {
-          await this.hass.callService("number", "set_value", {
-            entity_id: `number.${deviceName}_${entitySuffix}`,
-            value: patch[key],
-          });
-          this._data[key] = patch[key];
-          this._savedFields.set(key, now);
+          const entityId = `number.${deviceName}_${entitySuffix}`;
+          try {
+            await this.hass.callService("number", "set_value", {
+              entity_id: entityId,
+              value: patch[key],
+            });
+            this._data[key] = patch[key];
+            this._savedFields.set(key, now);
+          } catch (err) {
+            console.error(`Error saving ${key} to ${entityId}:`, err);
+            throw err;
+          }
         }
       }
       

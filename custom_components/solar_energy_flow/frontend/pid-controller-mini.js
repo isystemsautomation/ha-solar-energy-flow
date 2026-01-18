@@ -221,12 +221,16 @@ class PIDControllerMini extends LitElement {
       const endTime = new Date();
       const startTime = new Date(endTime.getTime() - 3600000); // 1 hour ago
       
+      // Build query string for history API
+      const entityList = `${entityIds.pv},${entityIds.sp},${entityIds.output}`;
+      const url = `history/period/${startTime.toISOString()}?filter_entity_id=${encodeURIComponent(entityList)}&minimal_response=false&significant_changes_only=false`;
+      
       // Use correct Home Assistant history API format
-      const history = await this.hass.callApi("GET", `history/period/${startTime.toISOString()}`, {
-        filter_entity_id: `${entityIds.pv},${entityIds.sp},${entityIds.output}`,
-        minimal_response: false,
-        significant_changes_only: false,
-      });
+      const history = await this.hass.callApi("GET", url);
+
+      if (!history || !Array.isArray(history)) {
+        throw new Error("Invalid history data format");
+      }
 
       this._graphData = history;
       this._drawChart(canvas, history, entityIds);
@@ -245,7 +249,8 @@ class PIDControllerMini extends LitElement {
       this._resizeObserver = resizeObserver;
     } catch (err) {
       console.error("PID Mini: Failed to fetch history:", err);
-      container.innerHTML = `<div style='padding: 8px; color: var(--error-color, red); font-size: 12px;'>Graph error: ${err.message || err}</div>`;
+      const errorMsg = err?.message || (typeof err === 'string' ? err : JSON.stringify(err));
+      container.innerHTML = `<div style='padding: 8px; color: var(--error-color, red); font-size: 12px;'>Graph error: ${errorMsg}</div>`;
     }
   }
 

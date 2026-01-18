@@ -143,34 +143,22 @@ class PIDControllerPopup extends LitElement {
   _subscribeToStateChanges() {
     if (!this.hass || !this.config) return;
     
-    // Unsubscribe from previous subscription if any
     if (this._stateChangedUnsub) {
       this._stateChangedUnsub();
       this._stateChangedUnsub = null;
     }
     
-    // Subscribe to state_changed events for our entity using Home Assistant API
     const entityId = this.config.pid_entity;
-    
     const handleStateChanged = (ev) => {
       if (ev.detail && ev.detail.entity_id === entityId) {
-        // Entity state changed - force immediate update
         this._updateReadOnlyValues();
         this._checkEntityStateChanges();
-        // Also do a full update after a short delay to ensure all attributes are fresh
-        setTimeout(() => {
-          if (!this._editingFields.size) {
-            this._updateData();
-          }
-        }, 100);
       }
     };
     
-    // Try to use hass.subscribeEvents if available (Home Assistant API)
     if (this.hass.subscribeEvents) {
       this._stateChangedUnsub = this.hass.subscribeEvents(handleStateChanged, "state_changed");
     } else if (this.hass.connection && this.hass.connection.addEventListener) {
-      // Fallback: use connection event listener
       this.hass.connection.addEventListener("state_changed", handleStateChanged);
       this._stateChangedUnsub = () => {
         if (this.hass && this.hass.connection && this.hass.connection.removeEventListener) {
@@ -187,32 +175,21 @@ class PIDControllerPopup extends LitElement {
     }
     if (!this.hass || !this.config) return;
     
-    // Initial update immediately
     this._updateReadOnlyValues();
     
-    // Update every 300ms for very responsive updates
     this._updateInterval = setInterval(() => {
       if (this.hass && this.config) {
-        // Force update by checking hass state directly
         const state = this.hass.states[this.config.pid_entity];
         if (state) {
-          // Always update read-only values (PV, SP, Error, Output, etc.)
-          // This is critical - these values change frequently
           this._updateReadOnlyValues();
-          // Also check if entity attributes changed for editable fields (in case backend updated them)
           this._checkEntityStateChanges();
-          // Periodically do a full data update to catch any missed changes
-          // Do this less frequently to avoid overwriting user edits
-          if (!this._lastFullUpdate || (Date.now() - this._lastFullUpdate > 1500)) {
-            // Only do full update if not actively editing
-            if (this._editingFields.size === 0) {
-              this._updateData();
-              this._lastFullUpdate = Date.now();
-            }
+          if (this._editingFields.size === 0 && (!this._lastFullUpdate || (Date.now() - this._lastFullUpdate > 2000))) {
+            this._updateData();
+            this._lastFullUpdate = Date.now();
           }
         }
       }
-    }, 300);
+    }, 500);
   }
 
   _checkEntityStateChanges() {
@@ -224,61 +201,41 @@ class PIDControllerPopup extends LitElement {
     const attrs = state.attributes;
     let hasChanges = false;
     
-    // Check if editable values changed on the entity (e.g., manual_sp was updated by another source)
-    // Only update if we're not currently editing and haven't recently saved
     const now = Date.now();
-    const SAVE_TIMEOUT = 30000; // Increased timeout to 30 seconds to prevent overwriting recently saved values
+    const SAVE_TIMEOUT = 30000;
     
-    // Check manual_sp specifically - check number entity state, not just status entity attribute
     if (!this._editingFields.has("manual_sp")) {
       const savedTime = this._savedFields.get("manual_sp");
       if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
-        // Recently saved - check both status entity attribute AND number entity state
-        const statusEntityValue = attrs.manual_sp ?? null;
-        const savedValue = this._data.manual_sp ?? null;
-        
-        // Also check the actual number entity state (more reliable - this is what we saved to)
         const numberEntityId = this._findEntityId("number", "manual_sp_value");
         const numberEntityState = this.hass?.states[numberEntityId];
         const numberEntityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : null;
+        const savedValue = this._data.manual_sp ?? null;
+        const statusEntityValue = attrs.manual_sp ?? null;
         
-        console.log(`manual_sp recently saved (${Math.round((now - savedTime)/1000)}s ago), keeping saved value ${savedValue}, status entity has ${statusEntityValue}, number entity has ${numberEntityValue}`);
-        
-        // If number entity matches our saved value, the save was successful
-        // Keep the saved value until status entity also updates (coordinator has processed it)
         if (numberEntityValue !== null && Math.abs(numberEntityValue - savedValue) < 0.01) {
-          // Number entity confirms our save - now wait for status entity (coordinator) to update
           if (statusEntityValue !== null && Math.abs(statusEntityValue - savedValue) < 0.01) {
-            console.log(`manual_sp confirmed: both number and status entities match saved value ${savedValue}`);
             this._savedFields.delete("manual_sp");
           }
-          // Otherwise keep waiting - don't overwrite
         }
-        // Always keep our saved value - don't overwrite
-        return; // Exit early to prevent any updates to manual_sp
-      } else if (!savedTime || (now - savedTime > SAVE_TIMEOUT)) {
-        // Not recently saved, or timeout expired - update from entity
-        // Prefer number entity state over status entity attribute
+      } else {
         const numberEntityId = this._findEntityId("number", "manual_sp_value");
         const numberEntityState = this.hass?.states[numberEntityId];
         const entityValue = numberEntityState?.state ? parseFloat(numberEntityState.state) : (attrs.manual_sp ?? null);
         const currentValue = this._data.manual_sp ?? null;
         if (Math.abs((entityValue ?? 0) - (currentValue ?? 0)) > 0.01) {
-          console.log(`manual_sp updating from entity (timeout expired): ${currentValue} -> ${entityValue}`);
           this._data.manual_sp = entityValue;
           hasChanges = true;
         }
       }
     }
     
-    // Similar checks for other editable fields that might be updated externally
     const editableFields = ['manual_out', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode'];
     for (const field of editableFields) {
       if (this._editingFields.has(field)) continue;
       
       const savedTime = this._savedFields.get(field);
       if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
-        // Recently saved - only update if entity state matches what we saved
         let entityValue = attrs[field];
         if (field === 'enabled') {
           entityValue = attrs.enabled ?? false;
@@ -289,22 +246,16 @@ class PIDControllerPopup extends LitElement {
         }
         
         const savedValue = this._data[field];
-        let matches = false;
-        if (field === 'enabled' || field === 'runtime_mode') {
-          matches = entityValue === savedValue;
-        } else {
-          matches = Math.abs((entityValue ?? 0) - (savedValue ?? 0)) < 0.01;
-        }
+        const matches = (field === 'enabled' || field === 'runtime_mode') 
+          ? entityValue === savedValue
+          : Math.abs((entityValue ?? 0) - (savedValue ?? 0)) < 0.01;
         
         if (matches) {
-          // Entity matches our saved value - confirmed, clear the saved flag
           this._savedFields.delete(field);
         }
-        // Otherwise, keep our saved value and don't overwrite
         continue;
       }
       
-      // Not recently saved, or timeout expired - update from entity
       let entityValue = attrs[field];
       if (field === 'enabled') {
         entityValue = attrs.enabled ?? false;
@@ -352,11 +303,9 @@ class PIDControllerPopup extends LitElement {
         if (!this._updateInterval) {
           this._startLiveUpdates();
         }
-        // Always force an immediate update when hass/config changes
         this._updateReadOnlyValues();
       }
     }
-    // Also update when hass changes (entity state updates)
     if (changedProperties.has("hass")) {
       this._updateReadOnlyValues();
       this._checkEntityStateChanges();
@@ -370,7 +319,7 @@ class PIDControllerPopup extends LitElement {
     if (!state) return;
     
     const data = { ...this._data };
-    const SAVE_TIMEOUT = 30000; // Increased timeout to 30 seconds to prevent overwriting recently saved values
+    const SAVE_TIMEOUT = 30000;
 
     if (state?.attributes) {
       const attrs = state.attributes;
@@ -403,29 +352,21 @@ class PIDControllerPopup extends LitElement {
       const numberFields = ['manual_out', 'manual_sp', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output'];
       for (const field of numberFields) {
         if (this._editingFields.has(field)) {
-          // Currently being edited - keep edited value
           data[field] = this._edited[field] ?? this._data[field] ?? attrs[field] ?? null;
         } else if (this._edited[field] !== undefined) {
-          // Has unsaved edits - keep edited value
           data[field] = this._edited[field];
         } else {
-          // No edits - check if recently saved
           const savedTime = this._savedFields.get(field);
           if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) {
-            // Recently saved - keep our saved value, don't overwrite from entity
-            // Only update if entity state matches what we saved (confirmation)
             const entityValue = attrs[field] ?? null;
             const savedValue = this._data[field] ?? null;
             if (Math.abs((entityValue ?? 0) - (savedValue ?? 0)) < 0.01) {
-              // Entity matches - confirmed, we can clear the saved flag
               data[field] = entityValue;
               this._savedFields.delete(field);
             } else {
-              // Entity doesn't match yet - keep our saved value
               data[field] = savedValue;
             }
           } else {
-            // Not recently saved, or timeout expired - update from entity
             data[field] = attrs[field] ?? null;
             if (savedTime) {
               this._savedFields.delete(field);
@@ -435,7 +376,6 @@ class PIDControllerPopup extends LitElement {
       }
       
       data.runtime_modes = attrs.runtime_modes || ["AUTO_SP", "MANUAL_SP", "HOLD", "MANUAL_OUT"];
-      // Always update read-only values from entity state
       data.pv_value = attrs.pv_value ?? null;
       data.effective_sp = attrs.effective_sp ?? null;
       data.error = attrs.error ?? null;
@@ -456,17 +396,12 @@ class PIDControllerPopup extends LitElement {
   _updateReadOnlyValues() {
     if (!this.hass || !this.config) return;
 
-    // Always read the latest state directly from hass - don't cache
     const state = this.hass.states[this.config.pid_entity];
-    if (!state?.attributes) {
-      console.debug("PID Popup: No state/attributes for", this.config.pid_entity);
-      return;
-    }
+    if (!state?.attributes) return;
 
     const attrs = state.attributes;
     let hasChanges = false;
     
-    // Compare values with proper type handling
     const compareValue = (oldVal, newVal) => {
       if (oldVal === newVal) return false;
       if (oldVal === null || oldVal === undefined) return newVal !== null && newVal !== undefined;
@@ -477,7 +412,6 @@ class PIDControllerPopup extends LitElement {
       return String(oldVal) !== String(newVal);
     };
     
-    // Always update these values - they're read-only and should reflect current state
     const newValues = {
       pv_value: attrs.pv_value ?? null,
       effective_sp: attrs.effective_sp ?? null,
@@ -492,18 +426,11 @@ class PIDControllerPopup extends LitElement {
       output_pre_rate_limit: attrs.output_pre_rate_limit ?? null,
     };
     
-    // Check for changes
     if (compareValue(this._data.pv_value, newValues.pv_value)) {
       this._data.pv_value = newValues.pv_value;
       hasChanges = true;
     }
     if (compareValue(this._data.effective_sp, newValues.effective_sp)) {
-      console.log("PID Popup: SP changed", this._data.effective_sp, "->", newValues.effective_sp);
-      this._data.effective_sp = newValues.effective_sp;
-      hasChanges = true;
-    } else if (this._data.effective_sp !== newValues.effective_sp && newValues.effective_sp !== null) {
-      // Force update even if compareValue didn't detect change (might be precision issue)
-      console.log("PID Popup: SP force update", this._data.effective_sp, "->", newValues.effective_sp);
       this._data.effective_sp = newValues.effective_sp;
       hasChanges = true;
     }
@@ -544,9 +471,9 @@ class PIDControllerPopup extends LitElement {
       hasChanges = true;
     }
     
-    // Always request update - force re-render to show latest values
-    // Even if no changes detected, ensure UI is in sync with entity state
-    this.requestUpdate();
+    if (hasChanges) {
+      this.requestUpdate();
+    }
   }
 
   _hasEdits() {
@@ -578,6 +505,7 @@ class PIDControllerPopup extends LitElement {
       this._edited[key] = value;
       this._editingFields.add(key);
       this._data[key] = value;
+      this.requestUpdate();
     } else {
       delete this._edited[key];
       this._editingFields.delete(key);
@@ -610,12 +538,10 @@ class PIDControllerPopup extends LitElement {
     const deviceName = statusEntity.replace(/^sensor\./, "").replace(/_status$/, "");
     const candidateId = `${domain}.${deviceName}_${suffix}`;
     
-    // Check if entity exists
     if (this.hass.states[candidateId]) {
       return candidateId;
     }
     
-    // Try alternative: search for entity with matching suffix
     const prefix = `${domain}.${deviceName}`;
     for (const entityId in this.hass.states) {
       if (entityId.startsWith(prefix) && entityId.endsWith(`_${suffix}`)) {
@@ -623,7 +549,6 @@ class PIDControllerPopup extends LitElement {
       }
     }
     
-    // Fallback to candidate
     return candidateId;
   }
 
@@ -670,76 +595,16 @@ class PIDControllerPopup extends LitElement {
         if (patch[key] !== undefined) {
           const entityId = this._findEntityId("number", entitySuffix);
           try {
-            // Call the service - this should trigger the entity's async_set_native_value
-            // which updates the coordinator's _manual_sp_value and triggers a refresh
             await this.hass.callService("number", "set_value", {
               entity_id: entityId,
               value: patch[key],
             });
             
-            // Give the service call time to complete and trigger coordinator update
-            // The entity's async_set_native_value is async, so we need to wait a bit
             await new Promise(resolve => setTimeout(resolve, 200));
             
-            // Update _data immediately with saved value - this is the source of truth
             this._data[key] = patch[key];
-            // Mark as saved with timestamp - this prevents overwriting for 10 seconds
             this._savedFields.set(key, now);
-            // Remove from _edited since it's now saved
             delete this._edited[key];
-            console.log(`Saved ${key} = ${patch[key]} to ${entityId}, marked as saved at ${now}, will protect for 10 seconds`);
-            
-            // If this is manual_sp, the effective_sp will update after coordinator refresh
-            // The coordinator's async_set_manual_sp should have been called by the entity
-            // and async_request_refresh should trigger a recalculation
-            if (key === "manual_sp") {
-              const expectedSP = patch[key];
-              console.log(`Waiting for effective_sp to update to ${expectedSP}...`);
-              
-              // Update immediately to get current state
-              this._updateReadOnlyValues();
-              
-              // Check if effective_sp has updated to match our saved manual_sp
-              const checkSPUpdate = () => {
-                const state = this.hass?.states[this.config?.pid_entity];
-                if (!state?.attributes) return false;
-                
-                const currentSP = state.attributes.effective_sp;
-                const currentManualSP = state.attributes.manual_sp;
-                
-                console.log(`Checking: effective_sp=${currentSP}, manual_sp=${currentManualSP}, expected=${expectedSP}`);
-                
-                if (currentSP !== null && currentSP !== undefined) {
-                  const spDiff = Math.abs(currentSP - expectedSP);
-                  if (spDiff < 0.1) {
-                    console.log(`✓ effective_sp updated to ${currentSP} (expected ${expectedSP})`);
-                    this._updateReadOnlyValues();
-                    return true; // Found the update
-                  }
-                }
-                return false; // Not updated yet
-              };
-              
-              // Check immediately first
-              if (checkSPUpdate()) {
-                console.log(`effective_sp already updated!`);
-                return; // Already updated, no need to keep checking
-              }
-              
-              // Check at intervals
-              let checkCount = 0;
-              const maxChecks = 20; // Check for up to 20 seconds (coordinator might have slow update interval)
-              const checkInterval = setInterval(() => {
-                checkCount++;
-                this._updateReadOnlyValues();
-                if (checkSPUpdate() || checkCount >= maxChecks) {
-                  clearInterval(checkInterval);
-                  if (checkCount >= maxChecks) {
-                    console.warn(`effective_sp did not update to ${expectedSP} after ${maxChecks} checks. Coordinator may not be refreshing.`);
-                  }
-                }
-              }, 1000); // Check every second
-            }
           } catch (err) {
             console.error(`Error saving ${key} to ${entityId}:`, err);
             alert(`Error saving ${key}: ${err.message || err}`);

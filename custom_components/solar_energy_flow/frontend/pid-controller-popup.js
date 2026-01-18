@@ -118,6 +118,7 @@ class PIDControllerPopup extends LitElement {
     this._editingFields = new Set();
     this._savedFields = new Map();
     this._updateInterval = null;
+    this._lastFullUpdate = 0;
   }
 
   connectedCallback() {
@@ -141,10 +142,81 @@ class PIDControllerPopup extends LitElement {
         // Force update by checking hass state directly
         const state = this.hass.states[this.config.pid_entity];
         if (state) {
+          // Always update read-only values (PV, SP, Error, Output, etc.)
           this._updateReadOnlyValues();
+          // Also check if entity attributes changed for editable fields (in case backend updated them)
+          this._checkEntityStateChanges();
+          // Periodically do a full data update to catch any missed changes
+          // Do this less frequently to avoid overwriting user edits
+          if (!this._lastFullUpdate || (Date.now() - this._lastFullUpdate > 2000)) {
+            this._updateData();
+            this._lastFullUpdate = Date.now();
+          }
         }
       }
     }, 500);
+  }
+
+  _checkEntityStateChanges() {
+    if (!this.hass || !this.config) return;
+    
+    const state = this.hass.states[this.config.pid_entity];
+    if (!state?.attributes) return;
+    
+    const attrs = state.attributes;
+    let hasChanges = false;
+    
+    // Check if editable values changed on the entity (e.g., manual_sp was updated by another source)
+    // Only update if we're not currently editing and haven't recently saved
+    const now = Date.now();
+    const SAVE_TIMEOUT = 2000;
+    
+    if (!this._editingFields.has("manual_sp")) {
+      const savedTime = this._savedFields.get("manual_sp");
+      if (!savedTime || (now - savedTime > SAVE_TIMEOUT)) {
+        const entityValue = attrs.manual_sp ?? null;
+        const currentValue = this._data.manual_sp ?? null;
+        if (Math.abs((entityValue ?? 0) - (currentValue ?? 0)) > 0.01) {
+          this._data.manual_sp = entityValue;
+          hasChanges = true;
+        }
+      }
+    }
+    
+    // Similar checks for other editable fields that might be updated externally
+    const editableFields = ['manual_out', 'deadband', 'kp', 'ki', 'kd', 'max_output', 'min_output', 'enabled', 'runtime_mode'];
+    for (const field of editableFields) {
+      if (this._editingFields.has(field)) continue;
+      
+      const savedTime = this._savedFields.get(field);
+      if (savedTime && (now - savedTime <= SAVE_TIMEOUT)) continue;
+      
+      let entityValue = attrs[field];
+      if (field === 'enabled') {
+        entityValue = attrs.enabled ?? false;
+      } else if (field === 'runtime_mode') {
+        entityValue = attrs.runtime_mode || "AUTO_SP";
+      } else {
+        entityValue = attrs[field] ?? null;
+      }
+      
+      const currentValue = this._data[field];
+      if (field === 'enabled' || field === 'runtime_mode') {
+        if (entityValue !== currentValue) {
+          this._data[field] = entityValue;
+          hasChanges = true;
+        }
+      } else {
+        if (Math.abs((entityValue ?? 0) - (currentValue ?? 0)) > 0.01) {
+          this._data[field] = entityValue;
+          hasChanges = true;
+        }
+      }
+    }
+    
+    if (hasChanges) {
+      this.requestUpdate();
+    }
   }
 
   disconnectedCallback() {
@@ -180,6 +252,7 @@ class PIDControllerPopup extends LitElement {
     // Also update when hass changes (entity state updates)
     if (changedProperties.has("hass")) {
       this._updateReadOnlyValues();
+      this._checkEntityStateChanges();
     }
   }
 
@@ -346,7 +419,7 @@ class PIDControllerPopup extends LitElement {
       hasChanges = true;
     }
     
-    // Always request update to ensure UI reflects current state
+    // Always request update if changes detected
     if (hasChanges) {
       this.requestUpdate();
     }

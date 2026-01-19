@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryError, ConfigEn
 from homeassistant.core import HomeAssistant, Event
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.components.http import StaticPathConfig
 
 from .const import DOMAIN, PLATFORMS
@@ -208,6 +209,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolarEnergyControllerCon
         name=entry.title,
         manufacturer="Solar Energy Controller",
         model="PID Controller",
+        entry_type=DeviceEntryType.SERVICE,
     )
 
     try:

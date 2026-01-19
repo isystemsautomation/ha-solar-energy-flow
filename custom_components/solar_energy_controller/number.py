@@ -4,7 +4,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -213,6 +213,7 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
             name=entry.title,
             manufacturer="Solar Energy Controller",
             model="PID Controller",
+            entry_type=DeviceEntryType.SERVICE,
         )
 
     @property
@@ -286,6 +287,7 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             name=entry.title,
             manufacturer="Solar Energy Controller",
             model="PID Controller",
+            entry_type=DeviceEntryType.SERVICE,
         )
 
     @property

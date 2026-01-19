@@ -107,6 +107,8 @@ class PID:
                 self._integral = max(-max_integral, min(max_integral, new_integral))
             else:
                 self._integral += integral_update
+            # Update i_term to reflect the new integral value (for next step)
+            i = self._integral
 
         self._prev_pv = pv
         self._prev_t = now

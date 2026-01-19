@@ -3,6 +3,7 @@ from __future__ import annotations
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -100,37 +101,43 @@ class SolarEnergyFlowSelect(CoordinatorEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         if option not in self._attr_options:
-            return
+            raise ServiceValidationError(
+                f"Invalid option '{option}' for {self._attr_name}. "
+                f"Valid options are: {', '.join(self._attr_options)}"
+            )
 
-        options = dict(self._entry.options)
-        options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
-        options.setdefault(CONF_GRID_LIMITER_ENABLED, DEFAULT_GRID_LIMITER_ENABLED)
-        options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
-        options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
-        options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
-        options.setdefault(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
+        try:
+            options = dict(self._entry.options)
+            options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
+            options.setdefault(CONF_GRID_LIMITER_ENABLED, DEFAULT_GRID_LIMITER_ENABLED)
+            options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
+            options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
+            options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
+            options.setdefault(CONF_RUNTIME_MODE, DEFAULT_RUNTIME_MODE)
 
-        if self._option_key == CONF_GRID_LIMITER_TYPE and option not in (
-            GRID_LIMITER_TYPE_IMPORT,
-            GRID_LIMITER_TYPE_EXPORT,
-        ):
-            option = DEFAULT_GRID_LIMITER_TYPE
-        previous_runtime_mode = self.coordinator.get_runtime_mode()
+            if self._option_key == CONF_GRID_LIMITER_TYPE and option not in (
+                GRID_LIMITER_TYPE_IMPORT,
+                GRID_LIMITER_TYPE_EXPORT,
+            ):
+                option = DEFAULT_GRID_LIMITER_TYPE
+            previous_runtime_mode = self.coordinator.get_runtime_mode()
 
-        options[self._option_key] = option
+            options[self._option_key] = option
 
-        if (
-            self._option_key == CONF_RUNTIME_MODE
-            and option == RUNTIME_MODE_MANUAL_SP
-            and previous_runtime_mode != RUNTIME_MODE_MANUAL_SP
-        ):
-            manual_sp = self.coordinator.set_manual_sp_from_normal_setpoint()
-            if manual_sp is not None:
-                options[CONF_MANUAL_SP_VALUE] = manual_sp
-            else:
-                options.pop(CONF_MANUAL_SP_VALUE, None)
-                await self.coordinator.async_reset_manual_sp()
+            if (
+                self._option_key == CONF_RUNTIME_MODE
+                and option == RUNTIME_MODE_MANUAL_SP
+                and previous_runtime_mode != RUNTIME_MODE_MANUAL_SP
+            ):
+                manual_sp = self.coordinator.set_manual_sp_from_normal_setpoint()
+                if manual_sp is not None:
+                    options[CONF_MANUAL_SP_VALUE] = manual_sp
+                else:
+                    options.pop(CONF_MANUAL_SP_VALUE, None)
+                    await self.coordinator.async_reset_manual_sp()
 
-        self.coordinator.apply_options(options)
-        self.hass.config_entries.async_update_entry(self._entry, options=options)
-        await self.coordinator.async_request_refresh()
+            self.coordinator.apply_options(options)
+            self.hass.config_entries.async_update_entry(self._entry, options=options)
+            await self.coordinator.async_request_refresh()
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to set {self._attr_name} option: {err}") from err

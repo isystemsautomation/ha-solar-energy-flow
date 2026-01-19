@@ -3,6 +3,7 @@ from __future__ import annotations
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -59,12 +60,15 @@ class SolarEnergyFlowEnabledSwitch(CoordinatorEntity, SwitchEntity):
         await self._async_update_enabled(False)
 
     async def _async_update_enabled(self, enabled: bool) -> None:
-        options = dict(self._entry.options)
-        options[CONF_ENABLED] = enabled
+        try:
+            options = dict(self._entry.options)
+            options[CONF_ENABLED] = enabled
 
-        self.coordinator.apply_options(options)
-        self.hass.config_entries.async_update_entry(self._entry, options=options)
-        await self.coordinator.async_request_refresh()
+            self.coordinator.apply_options(options)
+            self.hass.config_entries.async_update_entry(self._entry, options=options)
+            await self.coordinator.async_request_refresh()
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to update enabled state: {err}") from err
 
 
 class SolarEnergyFlowRateLimiterSwitch(CoordinatorEntity, SwitchEntity):
@@ -130,10 +134,13 @@ class SolarEnergyFlowGridLimiterSwitch(CoordinatorEntity, SwitchEntity):
         await self._async_update_state(False)
 
     async def _async_update_state(self, enabled: bool) -> None:
-        options = dict(self._entry.options)
-        options[CONF_GRID_LIMITER_ENABLED] = enabled
-        options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
+        try:
+            options = dict(self._entry.options)
+            options[CONF_GRID_LIMITER_ENABLED] = enabled
+            options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
 
-        self.coordinator.apply_options(options)
-        self.hass.config_entries.async_update_entry(self._entry, options=options)
-        await self.coordinator.async_request_refresh()
+            self.coordinator.apply_options(options)
+            self.hass.config_entries.async_update_entry(self._entry, options=options)
+            await self.coordinator.async_request_refresh()
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to update {self._attr_name} state: {err}") from err

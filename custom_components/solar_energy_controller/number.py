@@ -3,6 +3,7 @@ from __future__ import annotations
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -218,35 +219,38 @@ class SolarEnergyFlowNumber(CoordinatorEntity, NumberEntity):
             return self._default
 
     async def async_set_native_value(self, value: float) -> None:
-        options = dict(self._entry.options)
+        try:
+            options = dict(self._entry.options)
 
-        # Keep existing values intact if they were never set before.
-        options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
-        options.setdefault(CONF_KP, DEFAULT_KP)
-        options.setdefault(CONF_KI, DEFAULT_KI)
-        options.setdefault(CONF_KD, DEFAULT_KD)
-        options.setdefault(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)
-        options.setdefault(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
-        options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
-        options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
-        options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
-        options.setdefault(CONF_RATE_LIMIT, DEFAULT_RATE_LIMIT)
+            # Keep existing values intact if they were never set before.
+            options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
+            options.setdefault(CONF_KP, DEFAULT_KP)
+            options.setdefault(CONF_KI, DEFAULT_KI)
+            options.setdefault(CONF_KD, DEFAULT_KD)
+            options.setdefault(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT)
+            options.setdefault(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT)
+            options.setdefault(CONF_GRID_LIMITER_LIMIT_W, DEFAULT_GRID_LIMITER_LIMIT_W)
+            options.setdefault(CONF_GRID_LIMITER_DEADBAND_W, DEFAULT_GRID_LIMITER_DEADBAND_W)
+            options.setdefault(CONF_PID_DEADBAND, DEFAULT_PID_DEADBAND)
+            options.setdefault(CONF_RATE_LIMIT, DEFAULT_RATE_LIMIT)
 
-        options[self._option_key] = value
+            options[self._option_key] = value
 
-        # Enforce predictable min/max relationship by auto-adjusting the paired value.
-        if self._option_key == CONF_MIN_OUTPUT:
-            max_val = float(options.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT))
-            if value > max_val:
-                options[CONF_MAX_OUTPUT] = value
-        elif self._option_key == CONF_MAX_OUTPUT:
-            min_val = float(options.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT))
-            if value < min_val:
-                options[CONF_MIN_OUTPUT] = value
+            # Enforce predictable min/max relationship by auto-adjusting the paired value.
+            if self._option_key == CONF_MIN_OUTPUT:
+                max_val = float(options.get(CONF_MAX_OUTPUT, DEFAULT_MAX_OUTPUT))
+                if value > max_val:
+                    options[CONF_MAX_OUTPUT] = value
+            elif self._option_key == CONF_MAX_OUTPUT:
+                min_val = float(options.get(CONF_MIN_OUTPUT, DEFAULT_MIN_OUTPUT))
+                if value < min_val:
+                    options[CONF_MIN_OUTPUT] = value
 
-        self.coordinator.apply_options(options)
-        self.hass.config_entries.async_update_entry(self._entry, options=options)
-        await self.coordinator.async_request_refresh()
+            self.coordinator.apply_options(options)
+            self.hass.config_entries.async_update_entry(self._entry, options=options)
+            await self.coordinator.async_request_refresh()
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to set {self._attr_name} value: {err}") from err
 
 
 class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
@@ -328,22 +332,28 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             allowed = runtime_mode == RUNTIME_MODE_MANUAL_OUT
 
         if not allowed:
-            await self._async_snap_back()
-            return
+            mode_name = "Manual SP" if self._option_key == CONF_MANUAL_SP_VALUE else "Manual OUT"
+            raise ServiceValidationError(
+                f"Cannot set {mode_name} value: controller is in {runtime_mode} mode. "
+                f"Switch to {mode_name} mode first."
+            )
 
-        options = dict(self._entry.options)
+        try:
+            options = dict(self._entry.options)
 
-        options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
-        options.setdefault(CONF_RUNTIME_MODE, runtime_mode)
-        options.setdefault(CONF_MANUAL_SP_VALUE, self.coordinator.get_manual_sp_value())
-        options.setdefault(CONF_MANUAL_OUT_VALUE, self.coordinator.get_manual_out_value())
-        options[self._option_key] = value
+            options.setdefault(CONF_ENABLED, DEFAULT_ENABLED)
+            options.setdefault(CONF_RUNTIME_MODE, runtime_mode)
+            options.setdefault(CONF_MANUAL_SP_VALUE, self.coordinator.get_manual_sp_value())
+            options.setdefault(CONF_MANUAL_OUT_VALUE, self.coordinator.get_manual_out_value())
+            options[self._option_key] = value
 
-        if self._option_key == CONF_MANUAL_SP_VALUE:
-            await self.coordinator.async_set_manual_sp(value)
-        else:
-            await self.coordinator.async_set_manual_out(value)
+            if self._option_key == CONF_MANUAL_SP_VALUE:
+                await self.coordinator.async_set_manual_sp(value)
+            else:
+                await self.coordinator.async_set_manual_out(value)
 
-        self.coordinator.apply_options(options)
-        self.hass.config_entries.async_update_entry(self._entry, options=options)
-        await self.coordinator.async_request_refresh()
+            self.coordinator.apply_options(options)
+            self.hass.config_entries.async_update_entry(self._entry, options=options)
+            await self.coordinator.async_request_refresh()
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to set {self._attr_name} value: {err}") from err

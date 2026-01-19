@@ -335,12 +335,43 @@ These reflect internal controller state and error conditions.
 
 ---
 
-## Update Interval
+## Data Updates
 
-- Configurable in seconds
-- Minimum: 1 second
-- Default: 10 seconds
-- Applied dynamically without restart
+The Solar Energy Controller integration uses a **polling-based data update mechanism**. The integration periodically reads the current state of the configured entities (Process Value, Setpoint, Grid Power, and Output) and recalculates the PID output.
+
+### Update Mechanism
+
+- **Polling-based**: The integration actively polls Home Assistant entity states at regular intervals
+- **Default polling interval**: 10 seconds
+- **Configurable**: The update interval can be adjusted in the integration options (minimum: 1 second)
+- **Dynamic updates**: Changes to the update interval are applied immediately without requiring a restart
+
+### How It Works
+
+1. At each update cycle, the coordinator:
+   - Reads the current state of the Process Value (PV) entity
+   - Reads the current state of the Setpoint (SP) entity
+   - Reads the current state of the Grid Power entity (if configured)
+   - Reads the current state of the Output entity
+   - Normalizes all values to 0–100% using the configured min/max ranges
+   - Calculates the PID output based on the error (SP - PV)
+   - Applies grid limiter and rate limiter constraints
+   - Writes the new output value to the Output entity
+
+2. The update interval determines how frequently this cycle repeats
+
+### Limitations
+
+- **Polling overhead**: More frequent updates (lower interval) increase Home Assistant state reads and writes
+- **Entity availability**: If any required entity becomes unavailable, the controller will log the issue and continue with the last known values where appropriate
+- **Not real-time**: Due to polling, there is a delay between actual changes in sensor values and controller response (up to the update interval)
+- **Designed for slow systems**: The integration is optimized for energy systems with seconds-level dynamics, not millisecond-level real-time control
+
+### Recommended Settings
+
+- **Energy systems (solar, grid, EV charging)**: 10–30 seconds (default: 10 seconds)
+- **Faster response needed**: 5–10 seconds (increases system load)
+- **Very slow systems**: 30–60 seconds (reduces system load)
 
 ---
 

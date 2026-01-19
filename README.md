@@ -11,6 +11,14 @@ Designed for **energy flow control** scenarios such as inverter power limiting, 
 
 ---
 
+## About
+
+Solar Energy Controller is an open-source PID control integration for Home Assistant, designed to provide flexible energy flow control for solar and grid-connected systems. This integration enables precise control of energy systems through a normalized, percent-based PID algorithm that works across different sensor types and units.
+
+The integration is developed and maintained as an open-source project. For more information, visit the [GitHub repository](https://github.com/isystemsautomation/ha-solar-energy-controller/).
+
+---
+
 ## Features
 
 - PID controller (Kp / Ki / Kd)
@@ -60,14 +68,28 @@ What this means:
 
 ---
 
-## Installation (HACS)
+## Installation
+
+### Prerequisites
+
+- Home Assistant 2023.9.0 or later
+- [HACS](https://hacs.xyz/) (Home Assistant Community Store) installed and configured
+
+If you don't have HACS installed yet:
+1. Follow the [HACS installation guide](https://hacs.xyz/docs/setup/download)
+2. Restart Home Assistant
+3. Complete the HACS setup wizard
+
+### Installation Steps
 
 1. In HACS, go to **Integrations → ⋮ → Custom repositories**
-2. Add this repository URL and select **Integration**
-3. Install **Solar Energy Controller**
-4. Restart Home Assistant
-5. Go to **Settings → Devices & Services → Add Integration**
-6. Search for **Solar Energy Controller**
+2. Add this repository URL: `https://github.com/isystemsautomation/ha-solar-energy-controller` and select **Integration** as the category
+3. Click **Add** and wait for the repository to be added
+4. Search for **Solar Energy Controller** in HACS
+5. Click **Download** to install the integration
+6. Restart Home Assistant
+7. Go to **Settings → Devices & Services → Add Integration**
+8. Search for **Solar Energy Controller** and follow the setup wizard
 
 ---
 

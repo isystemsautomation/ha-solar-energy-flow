@@ -314,7 +314,11 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
                 if display_value is not None:
                     return round(display_value, 1)
                 return round(data.manual_sp_value, 1)
-            return round(data.manual_out_value, 1)
+            elif self._option_key == CONF_MANUAL_OUT_VALUE:
+                display_value = getattr(data, "manual_out_display_value", None)
+                if display_value is not None:
+                    return round(display_value, 1)
+                return round(data.manual_out_value, 1)
         try:
             return round(float(self._entry.options.get(self._option_key, self._default)), 1)
         except (TypeError, ValueError):
@@ -374,6 +378,7 @@ class SolarEnergyFlowManualNumber(CoordinatorEntity, NumberEntity):
             options.setdefault(CONF_MANUAL_OUT_VALUE, self.coordinator.get_manual_out_value())
             options[self._option_key] = value
 
+            # Always save the value - it will be used when the mode is switched
             if self._option_key == CONF_MANUAL_SP_VALUE:
                 await self.coordinator.async_set_manual_sp(value)
             else:

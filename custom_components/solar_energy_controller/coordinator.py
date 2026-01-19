@@ -110,6 +110,7 @@ class FlowState:
     manual_sp_value: float | None
     manual_out_value: float
     manual_sp_display_value: float | None
+    manual_out_display_value: float | None
     p_term: float | None
     i_term: float | None
     d_term: float | None
@@ -177,6 +178,7 @@ class OutputPlan:
     status: str
     limiter_state: str
     manual_out_value: float
+    manual_out_display_value: float | None
     p_term: float | None
     i_term: float | None
     d_term: float | None
@@ -390,6 +392,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._previous_runtime_mode = self._runtime_mode
         self._invalid_output_reported = False
         self._output_write_failed_reported = False
+        # Store last auto values for display when in manual modes
+        self._last_auto_sp_value: float | None = None
+        self._last_auto_out_value: float | None = None
 
     def _get_normal_setpoint_value(self) -> float | None:
         """Return the current external setpoint with inversion applied (no limiter)."""
@@ -596,11 +601,24 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 self._manual_sp_value = None
                 self._manual_sp_initialized = False
 
+        # Store last auto SP value when switching from AUTO SP to MANUAL SP
+        if mode_changed and prev_runtime_mode == RUNTIME_MODE_AUTO_SP and runtime_mode == RUNTIME_MODE_MANUAL_SP:
+            if inputs.sp is not None:
+                self._last_auto_sp_value = inputs.sp
+        
+        # Display logic: show current SP in AUTO SP mode, show last auto SP in MANUAL SP mode
         manual_sp_display_value: float | None = self._manual_sp_value
         if runtime_mode == RUNTIME_MODE_AUTO_SP and inputs.sp is not None:
             manual_sp_display_value = inputs.sp
-        elif runtime_mode == RUNTIME_MODE_MANUAL_SP and self._manual_sp_value is None:
-            manual_sp_display_value = inputs.sp
+            # Update last auto SP value while in AUTO SP mode
+            self._last_auto_sp_value = inputs.sp
+        elif runtime_mode == RUNTIME_MODE_MANUAL_SP:
+            # In MANUAL SP mode, show the last auto SP value that was active before switching
+            if self._last_auto_sp_value is not None:
+                manual_sp_display_value = self._last_auto_sp_value
+            elif self._manual_sp_value is None:
+                # Fallback if no last auto SP stored
+                manual_sp_display_value = inputs.sp
 
         pv_for_pid: float | None = inputs.pv
         sp_for_pid: float | None = self._manual_sp_value if runtime_mode == RUNTIME_MODE_MANUAL_SP else inputs.sp
@@ -882,6 +900,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._manual_out_value = safe_output
             self._previous_runtime_mode = runtime_mode
             self._log_runtime_mode_change(prev_runtime_mode, runtime_mode, setpoint.manual_sp_value, manual_sp_display_value)
+            # When not in MANUAL OUT mode, display the current output
+            # When in MANUAL OUT mode, display the last auto OUT value
+            manual_out_display_value = safe_output if runtime_mode != RUNTIME_MODE_MANUAL_OUT else (self._last_auto_out_value if self._last_auto_out_value is not None else self._manual_out_value)
             return OutputPlan(
                 output=safe_output,
                 output_pre_rate_limit=safe_output,
@@ -889,6 +910,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 status="disabled",
                 limiter_state=GRID_LIMITER_STATE_NORMAL,
                 manual_out_value=self._manual_out_value,
+                manual_out_display_value=manual_out_display_value,
                 p_term=None,
                 i_term=None,
                 d_term=None,
@@ -902,6 +924,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._last_output_pct = self._output_percent_from_raw(held_output, options)
             self._previous_runtime_mode = runtime_mode
             self._log_runtime_mode_change(prev_runtime_mode, runtime_mode, setpoint.manual_sp_value, manual_sp_display_value)
+            # When not in MANUAL OUT mode, display the current output
+            # When in MANUAL OUT mode, display the last auto OUT value
+            manual_out_display_value = held_output if runtime_mode != RUNTIME_MODE_MANUAL_OUT else (self._last_auto_out_value if self._last_auto_out_value is not None else self._manual_out_value)
             return OutputPlan(
                 output=held_output,
                 output_pre_rate_limit=held_output,
@@ -909,14 +934,17 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 status="hold",
                 limiter_state=self._limiter_state,
                 manual_out_value=self._manual_out_value,
+                manual_out_display_value=manual_out_display_value,
                 p_term=None,
                 i_term=None,
                 d_term=None,
             )
 
         if runtime_mode == RUNTIME_MODE_MANUAL_OUT:
+            # Store last auto OUT value when switching TO MANUAL OUT mode
             if prev_runtime_mode != RUNTIME_MODE_MANUAL_OUT:
                 if self._last_output_raw is not None:
+                    self._last_auto_out_value = self._last_output_raw
                     self._manual_out_value = self._last_output_raw
                 else:
                     self._manual_out_value = _coerce_float(self._manual_out_value, DEFAULT_MANUAL_OUT_VALUE)
@@ -926,6 +954,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._log_runtime_mode_change(prev_runtime_mode, runtime_mode, setpoint.manual_sp_value, manual_sp_display_value)
             self._last_output_raw = manual_out_value
             self._last_output_pct = self._output_percent_from_raw(manual_out_value, options)
+            # In MANUAL OUT mode, display the last auto OUT value that was active before switching
+            manual_out_display_value = self._last_auto_out_value if self._last_auto_out_value is not None else self._manual_out_value
             return OutputPlan(
                 output=manual_out_value,
                 output_pre_rate_limit=manual_out_value,
@@ -933,6 +963,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 status="manual_out",
                 limiter_state=self._limiter_state,
                 manual_out_value=self._manual_out_value,
+                manual_out_display_value=manual_out_display_value,
                 p_term=None,
                 i_term=None,
                 d_term=None,
@@ -947,6 +978,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             self._last_sp_pct = None
             self._previous_runtime_mode = runtime_mode
             self._log_runtime_mode_change(prev_runtime_mode, runtime_mode, setpoint.manual_sp_value, manual_sp_display_value)
+            # When not in MANUAL OUT mode, display the current output (None in this case)
+            # When in MANUAL OUT mode, display the last auto OUT value
+            manual_out_display_value = None if runtime_mode != RUNTIME_MODE_MANUAL_OUT else (self._last_auto_out_value if self._last_auto_out_value is not None else self._manual_out_value)
             return OutputPlan(
                 output=None,
                 output_pre_rate_limit=None,
@@ -954,6 +988,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 status="missing_input",
                 limiter_state=limiter_result.limiter_state,
                 manual_out_value=self._manual_out_value,
+                manual_out_display_value=manual_out_display_value,
                 p_term=None,
                 i_term=None,
                 d_term=None,
@@ -1004,6 +1039,8 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         output_pre_rate_raw = self._output_raw_from_percent(step_result.output_pre_rate_limit, options)
         if runtime_mode != RUNTIME_MODE_MANUAL_OUT and output_raw is not None:
             self._manual_out_value = output_raw
+            # Store the current output as last auto OUT value when not in MANUAL OUT mode
+            self._last_auto_out_value = output_raw
 
         term_factor = output_span / 100.0 if output_span > 0 else None
         p_term_raw = step_result.p_term * term_factor if term_factor is not None else None
@@ -1017,6 +1054,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
         self._last_sp_pct = sp_for_pid
         self._last_output_pct = step_result.output
 
+        # When not in MANUAL OUT mode, display the current output
+        # (When in MANUAL OUT mode, display value is already set in the MANUAL OUT section above)
+        manual_out_display_value = output_raw if runtime_mode != RUNTIME_MODE_MANUAL_OUT else self._last_auto_out_value
         return OutputPlan(
             output=output_raw,
             output_pre_rate_limit=output_pre_rate_raw,
@@ -1024,6 +1064,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             status=status,
             limiter_state=limiter_result.limiter_state,
             manual_out_value=self._manual_out_value,
+            manual_out_display_value=manual_out_display_value,
             p_term=p_term_raw,
             i_term=i_term_raw,
             d_term=d_term_raw,
@@ -1066,6 +1107,9 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 self._invalid_output_reported = True
             self._previous_runtime_mode = setpoint_context.runtime_mode
             self._log_runtime_mode_change(prev_runtime_mode, setpoint_context.runtime_mode, prev_manual_sp_value, setpoint_context.manual_sp_display_value)
+            # When not in MANUAL OUT mode, display the current output (None in this case)
+            # When in MANUAL OUT mode, display the last auto OUT value
+            manual_out_display_value = None if setpoint_context.runtime_mode != RUNTIME_MODE_MANUAL_OUT else (self._last_auto_out_value if self._last_auto_out_value is not None else self._manual_out_value)
             return FlowState(
                 pv=limiter_result.pv_for_pid,
                 sp=limiter_result.sp_for_pid,
@@ -1080,6 +1124,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
                 manual_sp_value=self._manual_sp_value,
                 manual_out_value=self._manual_out_value,
                 manual_sp_display_value=setpoint_context.manual_sp_display_value,
+                manual_out_display_value=manual_out_display_value,
                 p_term=None,
                 i_term=None,
                 d_term=None,
@@ -1113,6 +1158,7 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             manual_sp_value=self._manual_sp_value,
             manual_out_value=output_plan.manual_out_value,
             manual_sp_display_value=setpoint_context.manual_sp_display_value,
+            manual_out_display_value=output_plan.manual_out_display_value,
             p_term=output_plan.p_term,
             i_term=output_plan.i_term,
             d_term=output_plan.d_term,

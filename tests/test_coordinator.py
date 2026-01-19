@@ -29,6 +29,7 @@ from custom_components.solar_energy_controller.const import (
     DEFAULT_MAX_OUTPUT,
     DEFAULT_MIN_OUTPUT,
     RUNTIME_MODE_AUTO_SP,
+    RUNTIME_MODE_HOLD,
     RUNTIME_MODE_MANUAL_OUT,
     RUNTIME_MODE_MANUAL_SP,
 )
@@ -219,12 +220,17 @@ async def test_coordinator_read_inputs(mock_hass, mock_entry):
     """Test coordinator _read_inputs."""
     coordinator = SolarEnergyFlowCoordinator(mock_hass, mock_entry)
     
-    # Mock states
-    mock_hass.states.get = MagicMock(side_effect=[
-        MockState("50.0"),  # PV
-        MockState("100.0"),  # Grid
-        MockState("60.0"),  # SP
-    ])
+    # Mock states - _read_inputs calls states.get for PV, Grid, and SP
+    def mock_get(entity_id):
+        if "pv" in entity_id.lower() or entity_id == "sensor.pv":
+            return MockState("50.0")
+        elif "grid" in entity_id.lower() or entity_id == "sensor.grid":
+            return MockState("100.0")
+        elif "sp" in entity_id.lower() or entity_id == "number.sp":
+            return MockState("60.0")
+        return None
+    
+    mock_hass.states.get = MagicMock(side_effect=mock_get)
     
     options = coordinator._build_runtime_options()
     inputs = coordinator._read_inputs(options)
@@ -239,11 +245,16 @@ async def test_coordinator_read_inputs_unavailable(mock_hass, mock_entry):
     coordinator = SolarEnergyFlowCoordinator(mock_hass, mock_entry)
     
     # Mock unavailable states
-    mock_hass.states.get = MagicMock(side_effect=[
-        MockState("unavailable"),  # PV
-        MockState("100.0"),  # Grid
-        MockState("60.0"),  # SP
-    ])
+    def mock_get(entity_id):
+        if "pv" in entity_id.lower() or entity_id == "sensor.pv":
+            return MockState("unavailable")
+        elif "grid" in entity_id.lower() or entity_id == "sensor.grid":
+            return MockState("100.0")
+        elif "sp" in entity_id.lower() or entity_id == "number.sp":
+            return MockState("60.0")
+        return None
+    
+    mock_hass.states.get = MagicMock(side_effect=mock_get)
     
     options = coordinator._build_runtime_options()
     inputs = coordinator._read_inputs(options)
@@ -255,20 +266,32 @@ async def test_coordinator_read_inputs_unavailable(mock_hass, mock_entry):
 async def test_coordinator_async_update_data(mock_hass, mock_entry):
     """Test coordinator _async_update_data."""
     coordinator = SolarEnergyFlowCoordinator(mock_hass, mock_entry)
+    # Set output range to 0-100 so 55% = 55.0 raw for easier testing
+    mock_entry.options[CONF_MIN_OUTPUT] = 0.0
+    mock_entry.options[CONF_MAX_OUTPUT] = 100.0
+
+    # Mock states - called for PV, Grid, SP, and Output
+    call_count = 0
+    def mock_get(entity_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1 or "pv" in (entity_id or "").lower():
+            return MockState("50.0")
+        elif call_count == 2 or "grid" in (entity_id or "").lower():
+            return MockState("100.0")
+        elif call_count == 3 or "sp" in (entity_id or "").lower():
+            return MockState("60.0")
+        elif call_count == 4 or "output" in (entity_id or "").lower():
+            return MockState("55.0")
+        return None
     
-    # Mock states
-    mock_hass.states.get = MagicMock(side_effect=[
-        MockState("50.0"),  # PV
-        MockState("100.0"),  # Grid
-        MockState("60.0"),  # SP
-        MockState("55.0"),  # Output
-    ])
+    mock_hass.states.get = MagicMock(side_effect=mock_get)
     
-    # Mock PID step
+    # Mock PID step - returns percent values (55.0 = 55%)
     with patch.object(coordinator.pid, "step") as mock_step:
         from custom_components.solar_energy_controller.pid import PIDStepResult
         mock_step.return_value = PIDStepResult(
-            output=55.0,
+            output=55.0,  # 55% which becomes 55.0 raw with 0-100 range
             error=10.0,
             p_term=5.0,
             i_term=3.0,
@@ -276,16 +299,18 @@ async def test_coordinator_async_update_data(mock_hass, mock_entry):
             output_pre_rate_limit=55.0,
         )
         
-        # Mock output writing
-        with patch.object(coordinator, "_maybe_write_output", new_callable=AsyncMock) as mock_write:
-            mock_write.return_value = MagicMock(write_failed=False, output=55.0)
-            
+        # Mock output writing - need to actually set _last_output_raw
+        async def mock_write(ent, output, opts):
+            coordinator._last_output_raw = output
+            return MagicMock(write_failed=False, output=output)
+        
+        with patch.object(coordinator, "_maybe_write_output", side_effect=mock_write):
             result = await coordinator._async_update_data()
             
             assert result is not None
             assert result.pv == 50.0
             assert result.sp == 60.0
-            assert result.out == 55.0
+            assert result.out == pytest.approx(55.0)
 
 
 async def test_coordinator_async_update_data_disabled(mock_hass, mock_entry):
@@ -303,7 +328,16 @@ async def test_coordinator_async_update_data_hold_mode(mock_hass, mock_entry):
     """Test coordinator _async_update_data in HOLD mode."""
     coordinator = SolarEnergyFlowCoordinator(mock_hass, mock_entry)
     coordinator._last_output_raw = 50.0
-    mock_entry.options[CONF_RUNTIME_MODE] = "HOLD"
+    mock_entry.options[CONF_RUNTIME_MODE] = RUNTIME_MODE_HOLD
+    # Update coordinator's runtime mode to match entry options
+    coordinator._runtime_mode = RUNTIME_MODE_HOLD
+    
+    # Mock states for inputs
+    def mock_get(entity_id):
+        if entity_id and ("pv" in entity_id.lower() or "grid" in entity_id.lower() or "sp" in entity_id.lower() or "output" in entity_id.lower()):
+            return MockState("0.0")
+        return None
+    mock_hass.states.get = MagicMock(side_effect=mock_get)
     
     result = await coordinator._async_update_data()
     
@@ -316,6 +350,15 @@ async def test_coordinator_async_update_data_manual_out_mode(mock_hass, mock_ent
     coordinator = SolarEnergyFlowCoordinator(mock_hass, mock_entry)
     coordinator._manual_out_value = 70.0
     mock_entry.options[CONF_RUNTIME_MODE] = RUNTIME_MODE_MANUAL_OUT
+    # Update coordinator's runtime mode to match entry options
+    coordinator._runtime_mode = RUNTIME_MODE_MANUAL_OUT
+    
+    # Mock states for inputs
+    def mock_get(entity_id):
+        if entity_id and ("pv" in entity_id.lower() or "grid" in entity_id.lower() or "sp" in entity_id.lower() or "output" in entity_id.lower()):
+            return MockState("0.0")
+        return None
+    mock_hass.states.get = MagicMock(side_effect=mock_get)
     
     result = await coordinator._async_update_data()
     

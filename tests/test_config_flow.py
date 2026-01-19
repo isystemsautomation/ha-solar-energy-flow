@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 
 from custom_components.solar_energy_controller import DOMAIN
 from custom_components.solar_energy_controller.const import (
@@ -30,14 +30,22 @@ from custom_components.solar_energy_controller.const import (
 )
 
 
-@pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Enable custom integrations."""
-    return enable_custom_integrations
+# enable_custom_integrations fixture is provided by pytest_homeassistant_custom_component
+# and should work automatically. No wrapper needed.
+
+
+def _setup_test_entities(hass: HomeAssistant) -> None:
+    """Helper to set up test entities required for config flow."""
+    hass.states.async_set("sensor.pv_sensor", "50.0")
+    hass.states.async_set("number.setpoint", "60.0")
+    hass.states.async_set("number.output", "55.0")
+    hass.states.async_set("sensor.grid_power", "100.0")
 
 
 async def test_user_flow_success(hass: HomeAssistant) -> None:
     """Test successful user flow."""
+    _setup_test_entities(hass)
+    
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -84,27 +92,24 @@ async def test_user_flow_invalid_pv_domain(hass: HomeAssistant) -> None:
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            CONF_NAME: "Test Controller",
-            CONF_PROCESS_VALUE_ENTITY: "switch.invalid",  # Invalid domain
-            CONF_SETPOINT_ENTITY: "number.setpoint",
-            CONF_OUTPUT_ENTITY: "number.output",
-            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "user"
-    assert CONF_PROCESS_VALUE_ENTITY in result2["errors"]
-    assert result2["errors"][CONF_PROCESS_VALUE_ENTITY] == "invalid_pv_domain"
+    # Schema validation catches invalid domains before config flow validation
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Controller",
+                CONF_PROCESS_VALUE_ENTITY: "switch.invalid",  # Invalid domain
+                CONF_SETPOINT_ENTITY: "number.setpoint",
+                CONF_OUTPUT_ENTITY: "number.output",
+                CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
 
 async def test_user_flow_invalid_sp_domain(hass: HomeAssistant) -> None:
@@ -113,27 +118,24 @@ async def test_user_flow_invalid_sp_domain(hass: HomeAssistant) -> None:
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            CONF_NAME: "Test Controller",
-            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
-            CONF_SETPOINT_ENTITY: "sensor.invalid",  # Invalid domain
-            CONF_OUTPUT_ENTITY: "number.output",
-            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "user"
-    assert CONF_SETPOINT_ENTITY in result2["errors"]
-    assert result2["errors"][CONF_SETPOINT_ENTITY] == "invalid_setpoint_domain"
+    # Schema validation catches invalid domains before config flow validation
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Controller",
+                CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+                CONF_SETPOINT_ENTITY: "sensor.invalid",  # Invalid domain
+                CONF_OUTPUT_ENTITY: "number.output",
+                CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
 
 async def test_user_flow_invalid_output_domain(hass: HomeAssistant) -> None:
@@ -142,27 +144,24 @@ async def test_user_flow_invalid_output_domain(hass: HomeAssistant) -> None:
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            CONF_NAME: "Test Controller",
-            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
-            CONF_SETPOINT_ENTITY: "number.setpoint",
-            CONF_OUTPUT_ENTITY: "sensor.invalid",  # Invalid domain
-            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "user"
-    assert CONF_OUTPUT_ENTITY in result2["errors"]
-    assert result2["errors"][CONF_OUTPUT_ENTITY] == "invalid_output_domain"
+    # Schema validation catches invalid domains before config flow validation
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Controller",
+                CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+                CONF_SETPOINT_ENTITY: "number.setpoint",
+                CONF_OUTPUT_ENTITY: "sensor.invalid",  # Invalid domain
+                CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
 
 async def test_user_flow_invalid_grid_domain(hass: HomeAssistant) -> None:
@@ -171,27 +170,24 @@ async def test_user_flow_invalid_grid_domain(hass: HomeAssistant) -> None:
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            CONF_NAME: "Test Controller",
-            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
-            CONF_SETPOINT_ENTITY: "number.setpoint",
-            CONF_OUTPUT_ENTITY: "number.output",
-            CONF_GRID_POWER_ENTITY: "switch.invalid",  # Invalid domain
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "user"
-    assert CONF_GRID_POWER_ENTITY in result2["errors"]
-    assert result2["errors"][CONF_GRID_POWER_ENTITY] == "invalid_grid_domain"
+    # Schema validation catches invalid domains before config flow validation
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Controller",
+                CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+                CONF_SETPOINT_ENTITY: "number.setpoint",
+                CONF_OUTPUT_ENTITY: "number.output",
+                CONF_GRID_POWER_ENTITY: "switch.invalid",  # Invalid domain
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
 
 async def test_user_flow_invalid_pv_range(hass: HomeAssistant) -> None:
@@ -283,31 +279,30 @@ async def test_user_flow_invalid_grid_range(hass: HomeAssistant) -> None:
 
 async def test_user_flow_invalid_range_non_numeric(hass: HomeAssistant) -> None:
     """Test user flow with non-numeric range values."""
+    _setup_test_entities(hass)
+    
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            CONF_NAME: "Test Controller",
-            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
-            CONF_SETPOINT_ENTITY: "number.setpoint",
-            CONF_OUTPUT_ENTITY: "number.output",
-            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
-            CONF_PV_MIN: "not_a_number",  # Invalid
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "user"
-    assert "base" in result2["errors"]
-    assert result2["errors"]["base"] == "invalid_range"
+    # Schema validation with vol.Coerce(float) will raise InvalidData for non-numeric values
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Controller",
+                CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+                CONF_SETPOINT_ENTITY: "number.setpoint",
+                CONF_OUTPUT_ENTITY: "number.output",
+                CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+                CONF_PV_MIN: "not_a_number",  # Invalid
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
 
 async def test_user_flow_multiple_errors(hass: HomeAssistant) -> None:
@@ -316,31 +311,31 @@ async def test_user_flow_multiple_errors(hass: HomeAssistant) -> None:
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            CONF_NAME: "Test Controller",
-            CONF_PROCESS_VALUE_ENTITY: "switch.invalid",  # Invalid domain
-            CONF_SETPOINT_ENTITY: "sensor.invalid",  # Invalid domain
-            CONF_OUTPUT_ENTITY: "number.output",
-            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "user"
-    assert CONF_PROCESS_VALUE_ENTITY in result2["errors"]
-    assert CONF_SETPOINT_ENTITY in result2["errors"]
+    # Schema validation catches invalid domains before config flow validation
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Controller",
+                CONF_PROCESS_VALUE_ENTITY: "switch.invalid",  # Invalid domain
+                CONF_SETPOINT_ENTITY: "sensor.invalid",  # Invalid domain
+                CONF_OUTPUT_ENTITY: "number.output",
+                CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
 
 async def test_user_flow_duplicate_entry(hass: HomeAssistant) -> None:
     """Test user flow prevents duplicate entries."""
+    _setup_test_entities(hass)
+    hass.states.async_set("sensor.grid_power2", "100.0")
+    
     # Create first entry
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -391,6 +386,9 @@ async def test_user_flow_duplicate_entry(hass: HomeAssistant) -> None:
 
 async def test_user_flow_different_unique_id_allowed(hass: HomeAssistant) -> None:
     """Test user flow allows different unique IDs."""
+    _setup_test_entities(hass)
+    hass.states.async_set("sensor.pv_sensor2", "50.0")
+    
     # Create first entry
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -442,35 +440,38 @@ async def test_user_flow_different_unique_id_allowed(hass: HomeAssistant) -> Non
 
 async def test_user_flow_error_recovery(hass: HomeAssistant) -> None:
     """Test user flow can recover from errors."""
+    _setup_test_entities(hass)
+    
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    # First attempt with error
-    result2 = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            CONF_NAME: "Test Controller",
-            CONF_PROCESS_VALUE_ENTITY: "switch.invalid",  # Invalid domain
-            CONF_SETPOINT_ENTITY: "number.setpoint",
-            CONF_OUTPUT_ENTITY: "number.output",
-            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
+    # First attempt with error - schema validation catches invalid domain
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Controller",
+                CONF_PROCESS_VALUE_ENTITY: "switch.invalid",  # Invalid domain
+                CONF_SETPOINT_ENTITY: "number.setpoint",
+                CONF_OUTPUT_ENTITY: "number.output",
+                CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
+
+    # Second attempt - need to re-init the flow after InvalidData
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "user"
-    assert CONF_PROCESS_VALUE_ENTITY in result2["errors"]
-
     # Second attempt with corrected value
     result3 = await hass.config_entries.flow.async_configure(
-        result2["flow_id"],
+        result["flow_id"],
         {
             CONF_NAME: "Test Controller",
             CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",  # Fixed
@@ -529,28 +530,23 @@ async def test_options_flow_invalid_domains(hass: HomeAssistant) -> None:
     entry = await _create_test_entry(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result2 = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_PROCESS_VALUE_ENTITY: "switch.invalid",
-            CONF_SETPOINT_ENTITY: "sensor.invalid",
-            CONF_OUTPUT_ENTITY: "sensor.invalid",
-            CONF_GRID_POWER_ENTITY: "switch.invalid",
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["step_id"] == "init"
-    assert CONF_PROCESS_VALUE_ENTITY in result2["errors"]
-    assert CONF_SETPOINT_ENTITY in result2["errors"]
-    assert CONF_OUTPUT_ENTITY in result2["errors"]
-    assert CONF_GRID_POWER_ENTITY in result2["errors"]
+    # Schema validation catches invalid domains before config flow validation
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_PROCESS_VALUE_ENTITY: "switch.invalid",
+                CONF_SETPOINT_ENTITY: "sensor.invalid",
+                CONF_OUTPUT_ENTITY: "sensor.invalid",
+                CONF_GRID_POWER_ENTITY: "switch.invalid",
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
 
 async def test_options_flow_invalid_ranges(hass: HomeAssistant) -> None:
@@ -586,29 +582,29 @@ async def test_options_flow_error_recovery(hass: HomeAssistant) -> None:
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
 
-    # First attempt with error
-    result2 = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_PROCESS_VALUE_ENTITY: "switch.invalid",
-            CONF_SETPOINT_ENTITY: "number.setpoint",
-            CONF_OUTPUT_ENTITY: "number.output",
-            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
-            CONF_PV_MIN: DEFAULT_PV_MIN,
-            CONF_PV_MAX: DEFAULT_PV_MAX,
-            CONF_SP_MIN: DEFAULT_SP_MIN,
-            CONF_SP_MAX: DEFAULT_SP_MAX,
-            CONF_GRID_MIN: DEFAULT_GRID_MIN,
-            CONF_GRID_MAX: DEFAULT_GRID_MAX,
-        },
-    )
+    # First attempt with error - schema validation catches invalid domain
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_PROCESS_VALUE_ENTITY: "switch.invalid",
+                CONF_SETPOINT_ENTITY: "number.setpoint",
+                CONF_OUTPUT_ENTITY: "number.output",
+                CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+                CONF_PV_MIN: DEFAULT_PV_MIN,
+                CONF_PV_MAX: DEFAULT_PV_MAX,
+                CONF_SP_MIN: DEFAULT_SP_MIN,
+                CONF_SP_MAX: DEFAULT_SP_MAX,
+                CONF_GRID_MIN: DEFAULT_GRID_MIN,
+                CONF_GRID_MAX: DEFAULT_GRID_MAX,
+            },
+        )
 
-    assert result2["type"] == FlowResultType.FORM
-    assert CONF_PROCESS_VALUE_ENTITY in result2["errors"]
-
+    # Second attempt - need to re-init the flow after InvalidData
+    result = await hass.config_entries.options.async_init(entry.entry_id)
     # Second attempt with corrected value
     result3 = await hass.config_entries.options.async_configure(
-        result2["flow_id"],
+        result["flow_id"],
         {
             CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",  # Fixed
             CONF_SETPOINT_ENTITY: "number.setpoint",
@@ -669,6 +665,8 @@ async def test_options_flow_preserves_values(hass: HomeAssistant) -> None:
 
 async def _create_test_entry(hass: HomeAssistant) -> config_entries.ConfigEntry:
     """Helper to create a test config entry."""
+    _setup_test_entities(hass)
+    
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )

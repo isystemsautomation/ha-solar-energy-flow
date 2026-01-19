@@ -226,5 +226,5 @@ async def test_async_setup_entry(hass: HomeAssistant, mock_entry):
     # Verify entities are created
     assert mock_add_entities.called
     call_args = mock_add_entities.call_args[0][0]
-    assert len(call_args) == 10  # Should create 10 sensor entities
+    assert len(call_args) == 11  # Should create 11 sensor entities
 

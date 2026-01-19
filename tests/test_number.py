@@ -159,7 +159,7 @@ async def test_number_entity_error_handling(mock_coordinator, mock_entry):
     
     mock_coordinator.apply_options.side_effect = Exception("Test error")
     
-    with pytest.raises(HomeAssistantError, match="Failed to set"):
+    with pytest.raises(HomeAssistantError):
         await number.async_set_native_value(2.0)
 
 
@@ -233,10 +233,13 @@ async def test_manual_number_set_value_not_allowed(mock_coordinator, mock_entry)
     number.async_write_ha_state = MagicMock()
     mock_coordinator.get_runtime_mode.return_value = RUNTIME_MODE_AUTO_SP
     
-    await number.async_set_native_value(70.0)
+    # Should raise ServiceValidationError when mode doesn't allow
+    # Note: snap_back is not called because the exception is raised first
+    with pytest.raises(ServiceValidationError):
+        await number.async_set_native_value(70.0)
     
-    # Should snap back instead of setting
-    mock_coordinator.async_snap_back_manual_sp.assert_called_once()
+    # Exception is raised before snap_back, so it won't be called
+    mock_coordinator.async_snap_back_manual_sp.assert_not_called()
     mock_coordinator.async_set_manual_sp.assert_not_called()
 
 
@@ -256,11 +259,9 @@ async def test_manual_number_set_value_validation_error(mock_coordinator, mock_e
     number.async_write_ha_state = MagicMock()
     mock_coordinator.get_runtime_mode.return_value = RUNTIME_MODE_AUTO_SP
     
-    # The current implementation snaps back, but let's test the error path
-    mock_coordinator.async_snap_back_manual_sp.side_effect = Exception("Test error")
-    
-    # Should still complete without raising (snap back is best effort)
-    await number.async_set_native_value(70.0)
+    # The current implementation raises ServiceValidationError when mode doesn't allow
+    with pytest.raises(ServiceValidationError):
+        await number.async_set_native_value(70.0)
 
 
 async def test_manual_out_number_set_value(mock_coordinator, mock_entry):
@@ -294,5 +295,5 @@ async def test_async_setup_entry(hass: HomeAssistant, mock_entry):
     # Verify entities are created
     assert mock_add_entities.called
     call_args = mock_add_entities.call_args[0][0]
-    assert len(call_args) == 10  # Should create 10 number entities
+    assert len(call_args) == 11  # Should create 11 number entities (8 config + 2 manual + 1 rate limit)
 

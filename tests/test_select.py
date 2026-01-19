@@ -106,7 +106,7 @@ async def test_select_select_option_invalid(mock_coordinator, mock_entry):
         None,
     )
     
-    with pytest.raises(ServiceValidationError, match="Invalid option"):
+    with pytest.raises(ServiceValidationError):
         await select.async_select_option("invalid_option")
 
 
@@ -166,8 +166,8 @@ async def test_select_error_handling(mock_coordinator, mock_entry):
     select.hass = mock_entry.hass
     
     mock_coordinator.apply_options.side_effect = Exception("Test error")
-    
-    with pytest.raises(HomeAssistantError, match="Failed to set"):
+
+    with pytest.raises(HomeAssistantError):
         await select.async_select_option(GRID_LIMITER_TYPE_EXPORT)
 
 

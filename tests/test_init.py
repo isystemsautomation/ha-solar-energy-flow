@@ -88,19 +88,46 @@ async def test_async_setup_entry_success(mock_hass, mock_entry):
 
 async def test_async_setup_entry_missing_entities(mock_hass, mock_entry):
     """Test async_setup_entry with missing entities."""
-    mock_hass.states.__contains__ = MagicMock(return_value=False)
+    # Mock states.get to return None (entity not found)
+    mock_hass.states.get = MagicMock(return_value=None)
+    # Add data attribute for device registry access
+    if not hasattr(mock_hass, 'data'):
+        mock_hass.data = {}
+    # Add config attribute for storage path
+    if not hasattr(mock_hass, 'config'):
+        mock_hass.config = MagicMock()
+        mock_hass.config.config_dir = "/tmp/test_config"
     
-    with pytest.raises(ConfigEntryError, match="Required entities not found"):
-        await async_setup_entry(mock_hass, mock_entry)
+    # Mock device registry
+    mock_device_registry = MagicMock()
+    mock_device_registry.async_get_or_create = MagicMock()
+    
+    with patch('custom_components.solar_energy_controller.__init__.dr.async_get', return_value=mock_device_registry):
+        with pytest.raises(ConfigEntryError, match="Required entities not found"):
+            await async_setup_entry(mock_hass, mock_entry)
 
 
 async def test_async_setup_entry_unavailable_entities(mock_hass, mock_entry):
     """Test async_setup_entry with unavailable entities."""
-    mock_hass.states.__contains__ = MagicMock(return_value=True)
-    mock_hass.states.__getitem__ = MagicMock(return_value=MagicMock(state="unavailable"))
+    # Mock states.get to return a state with "unavailable" status
+    mock_state = MagicMock()
+    mock_state.state = "unavailable"
+    mock_hass.states.get = MagicMock(return_value=mock_state)
+    # Add data attribute for device registry access
+    if not hasattr(mock_hass, 'data'):
+        mock_hass.data = {}
+    # Add config attribute for storage path
+    if not hasattr(mock_hass, 'config'):
+        mock_hass.config = MagicMock()
+        mock_hass.config.config_dir = "/tmp/test_config"
     
-    with pytest.raises(ConfigEntryNotReady, match="Required entities are unavailable"):
-        await async_setup_entry(mock_hass, mock_entry)
+    # Mock device registry
+    mock_device_registry = MagicMock()
+    mock_device_registry.async_get_or_create = MagicMock()
+    
+    with patch('custom_components.solar_energy_controller.__init__.dr.async_get', return_value=mock_device_registry):
+        with pytest.raises(ConfigEntryNotReady, match="Required entities are unavailable"):
+            await async_setup_entry(mock_hass, mock_entry)
 
 
 async def test_async_setup_entry_coordinator_failure(mock_hass, mock_entry):

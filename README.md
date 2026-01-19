@@ -93,6 +93,25 @@ If you don't have HACS installed yet:
 
 ---
 
+## Removal
+
+To remove the Solar Energy Controller integration:
+
+1. Go to **Settings → Devices & Services**
+2. Find **Solar Energy Controller** in the list of integrations
+3. Click on the integration entry
+4. Click the **⋮** (three dots) menu in the top right corner
+5. Select **Delete** and confirm the removal
+6. (Optional) To remove the integration files from HACS:
+   - Go to **HACS → Integrations**
+   - Find **Solar Energy Controller**
+   - Click **⋮** → **Remove**
+7. Restart Home Assistant to complete the removal
+
+> **Note:** Removing the integration will delete all configuration entries and entities. Any automations or scripts that reference these entities will need to be updated.
+
+---
+
 ## Initial Configuration
 
 During setup you select the entities used by the controller and define their operating ranges for normalization.

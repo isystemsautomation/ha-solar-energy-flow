@@ -116,6 +116,36 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not range_valid:
                 errors["base"] = "invalid_range"
 
+            if not errors:
+                # Test connection: verify all entities exist and are accessible
+                try:
+                    pv_entity = user_input[CONF_PROCESS_VALUE_ENTITY]
+                    sp_entity = user_input[CONF_SETPOINT_ENTITY]
+                    output_entity = user_input[CONF_OUTPUT_ENTITY]
+                    grid_entity = user_input[CONF_GRID_POWER_ENTITY]
+
+                    if pv_entity not in self.hass.states:
+                        errors[CONF_PROCESS_VALUE_ENTITY] = "entity_not_found"
+                    elif self.hass.states[pv_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_PROCESS_VALUE_ENTITY] = "entity_unavailable"
+
+                    if sp_entity not in self.hass.states:
+                        errors[CONF_SETPOINT_ENTITY] = "entity_not_found"
+                    elif self.hass.states[sp_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_SETPOINT_ENTITY] = "entity_unavailable"
+
+                    if output_entity not in self.hass.states:
+                        errors[CONF_OUTPUT_ENTITY] = "entity_not_found"
+                    elif self.hass.states[output_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_OUTPUT_ENTITY] = "entity_unavailable"
+
+                    if grid_entity not in self.hass.states:
+                        errors[CONF_GRID_POWER_ENTITY] = "entity_not_found"
+                    elif self.hass.states[grid_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_GRID_POWER_ENTITY] = "entity_unavailable"
+                except Exception:
+                    errors["base"] = "connection_failed"
+
             if errors:
                 return self.async_show_form(step_id="user", data_schema=self._build_user_schema(), errors=errors)
 
@@ -349,6 +379,36 @@ class SolarEnergyFlowOptionsFlowHandler(config_entries.OptionsFlow):
                     errors["base"] = "invalid_sp_range"
                 elif not self._validate_range(cleaned[CONF_GRID_MIN], cleaned[CONF_GRID_MAX]):
                     errors["base"] = "invalid_grid_range"
+
+            if not errors:
+                # Test connection: verify all entities exist and are accessible
+                try:
+                    pv_entity = cleaned[CONF_PROCESS_VALUE_ENTITY]
+                    sp_entity = cleaned[CONF_SETPOINT_ENTITY]
+                    output_entity = cleaned[CONF_OUTPUT_ENTITY]
+                    grid_entity = cleaned[CONF_GRID_POWER_ENTITY]
+
+                    if pv_entity not in self.hass.states:
+                        errors[CONF_PROCESS_VALUE_ENTITY] = "entity_not_found"
+                    elif self.hass.states[pv_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_PROCESS_VALUE_ENTITY] = "entity_unavailable"
+
+                    if sp_entity not in self.hass.states:
+                        errors[CONF_SETPOINT_ENTITY] = "entity_not_found"
+                    elif self.hass.states[sp_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_SETPOINT_ENTITY] = "entity_unavailable"
+
+                    if output_entity not in self.hass.states:
+                        errors[CONF_OUTPUT_ENTITY] = "entity_not_found"
+                    elif self.hass.states[output_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_OUTPUT_ENTITY] = "entity_unavailable"
+
+                    if grid_entity not in self.hass.states:
+                        errors[CONF_GRID_POWER_ENTITY] = "entity_not_found"
+                    elif self.hass.states[grid_entity].state in ("unavailable", "unknown"):
+                        errors[CONF_GRID_POWER_ENTITY] = "entity_unavailable"
+                except Exception:
+                    errors["base"] = "connection_failed"
 
             if errors:
                 return self.async_show_form(

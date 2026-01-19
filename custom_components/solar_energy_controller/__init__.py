@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryError, ConfigEntryNotReady
 from homeassistant.core import HomeAssistant, Event
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.helpers import device_registry as dr
@@ -140,6 +140,64 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SolarEnergyControllerConfigEntry) -> bool:
+    """Set up Solar Energy Controller from a config entry."""
+    from .const import (
+        CONF_PROCESS_VALUE_ENTITY,
+        CONF_SETPOINT_ENTITY,
+        CONF_OUTPUT_ENTITY,
+        CONF_GRID_POWER_ENTITY,
+    )
+
+    # Validate that all required entities exist and are accessible
+    # Check both entry.data and entry.options (entities can be in either)
+    required_entities = {
+        CONF_PROCESS_VALUE_ENTITY: entry.options.get(CONF_PROCESS_VALUE_ENTITY) or entry.data.get(CONF_PROCESS_VALUE_ENTITY),
+        CONF_SETPOINT_ENTITY: entry.options.get(CONF_SETPOINT_ENTITY) or entry.data.get(CONF_SETPOINT_ENTITY),
+        CONF_OUTPUT_ENTITY: entry.options.get(CONF_OUTPUT_ENTITY) or entry.data.get(CONF_OUTPUT_ENTITY),
+        CONF_GRID_POWER_ENTITY: entry.options.get(CONF_GRID_POWER_ENTITY) or entry.data.get(CONF_GRID_POWER_ENTITY),
+    }
+
+    missing_entities = []
+    unavailable_entities = []
+
+    for key, entity_id in required_entities.items():
+        if not entity_id:
+            missing_entities.append(key)
+            continue
+
+        if entity_id not in hass.states:
+            missing_entities.append(key)
+        else:
+            state = hass.states[entity_id]
+            if state.state in ("unavailable", "unknown"):
+                unavailable_entities.append(key)
+
+    if missing_entities:
+        entity_names = {
+            CONF_PROCESS_VALUE_ENTITY: "Process Value",
+            CONF_SETPOINT_ENTITY: "Setpoint",
+            CONF_OUTPUT_ENTITY: "Output",
+            CONF_GRID_POWER_ENTITY: "Grid Power",
+        }
+        missing_names = [entity_names[key] for key in missing_entities]
+        raise ConfigEntryError(
+            f"Required entities not found: {', '.join(missing_names)}. "
+            "Please check your configuration and ensure all entities exist."
+        )
+
+    if unavailable_entities:
+        entity_names = {
+            CONF_PROCESS_VALUE_ENTITY: "Process Value",
+            CONF_SETPOINT_ENTITY: "Setpoint",
+            CONF_OUTPUT_ENTITY: "Output",
+            CONF_GRID_POWER_ENTITY: "Grid Power",
+        }
+        unavailable_names = [entity_names[key] for key in unavailable_entities]
+        raise ConfigEntryNotReady(
+            f"Required entities are unavailable: {', '.join(unavailable_names)}. "
+            "Please ensure the entities are working and try again."
+        )
+
     coordinator = SolarEnergyFlowCoordinator(hass, entry)
     entry.runtime_data = coordinator
 
@@ -152,7 +210,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolarEnergyControllerCon
         model="PID Controller",
     )
 
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception as err:
+        raise ConfigEntryNotReady(f"Failed to initialize coordinator: {err}") from err
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_update_listener))

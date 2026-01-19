@@ -5,7 +5,10 @@
       "invalid_setpoint_domain": "Select a number or input_number entity for the setpoint.",
       "invalid_output_domain": "Output must be a number or input_number entity.",
       "invalid_grid_domain": "Select a sensor, number, or input_number entity for grid power.",
-      "invalid_range": "Min must be less than max for PV, SP, and Grid ranges."
+      "invalid_range": "Min must be less than max for PV, SP, and Grid ranges.",
+      "entity_not_found": "Entity not found. Please check that the entity exists.",
+      "entity_unavailable": "Entity is unavailable. Please ensure the entity is working.",
+      "connection_failed": "Failed to validate entities. Please check your configuration."
     },
     "step": {
       "user": {

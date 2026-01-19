@@ -120,21 +120,20 @@ During setup you select the entities used by the controller and define their ope
   <img src="https://raw.githubusercontent.com/isystemsautomation/ha-solar-energy-controller/main/images/Configuration1.png" width="300">
 </p>
 
-| Item | Description | Supported Domains |
-|---|---|---|
-| Process Value (PV) | Measured value for control | `sensor`, `number`, `input_number` |
-| Setpoint (SP) | Target value | `number`, `input_number` |
-| Output | Controlled output | `number`, `input_number` |
-| Grid Power | Grid power measurement (optional) | `sensor`, `number`, `input_number` |
+### Required Configuration
 
-You will also configure:
-- **PV min / max** (raw units)
-- **SP min / max** (raw units)
-- **Grid min / max** (raw units)
+| Item | Description | Supported Domains | Default Range |
+|---|---|---|---|
+| **Name** | Friendly name for the controller instance | N/A | N/A |
+| **Process Value (PV)** | Measured value for control | `sensor`, `number`, `input_number` | N/A |
+| **Setpoint (SP)** | Target value | `number`, `input_number` | N/A |
+| **Output** | Controlled output | `number`, `input_number` | N/A |
+| **Grid Power** | Grid power measurement (required for grid limiter) | `sensor`, `number`, `input_number` | N/A |
+| **PV min / max** | Scaling range for process value normalization | N/A | -5000.0 to 5000.0 |
+| **SP min / max** | Scaling range for setpoint normalization | N/A | -5000.0 to 5000.0 |
+| **Grid min / max** | Scaling range for grid power normalization | N/A | -5000.0 to 5000.0 |
 
-These ranges are used only to scale signals internally to 0–100%.
-
-Invalid entity domains are rejected during setup.
+These ranges are used only to scale signals internally to 0–100%. Invalid entity domains are rejected during setup.
 
 ---
 
@@ -148,14 +147,24 @@ After installation, you can configure signal interpretation and controller behav
 
 ### Options
 
-- **Invert PV** – flips the sign of the process value if your meter reports the opposite direction
-- **Invert SP** – flips the setpoint sign
-- **Invert Grid Power** – flips grid power sign to match hardware conventions
+- **Process Value Entity** – Entity providing the measured process value
+  - Supported domains: `sensor`, `number`, `input_number`
+- **Setpoint Entity** – Entity providing the target setpoint
+  - Supported domains: `number`, `input_number`
+- **Output Entity** – Entity to be controlled by the PID
+  - Supported domains: `number`, `input_number`
+- **Grid Power Entity** – Entity providing grid power measurement
+  - Supported domains: `sensor`, `number`, `input_number`
+- **Invert PV** – Flips the sign of the process value if your meter reports the opposite direction (default: disabled)
+- **Invert SP** – Flips the setpoint sign (default: disabled)
+- **Invert Grid Power** – Flips grid power sign to match hardware conventions (default: disabled)
 - **PID mode**
-  - **Direct** – increasing error increases output
-  - **Reverse** – increasing error decreases output
-- **Update interval** – control loop execution interval (seconds)
-- **PV/SP/Grid min/max (raw units)** – scaling ranges used for 0–100% normalization
+  - **Direct** – Increasing error increases output (default)
+  - **Reverse** – Increasing error decreases output
+- **Update interval** – Control loop execution interval in seconds (default: 10, minimum: 1)
+- **PV min/max** – Scaling range for process value normalization in raw units (default: -5000.0 to 5000.0)
+- **SP min/max** – Scaling range for setpoint normalization in raw units (default: -5000.0 to 5000.0)
+- **Grid min/max** – Scaling range for grid power normalization in raw units (default: -5000.0 to 5000.0)
 
 ---
 
@@ -171,12 +180,19 @@ Runtime controls allow switching modes and manually overriding behavior.
 
 | Mode | Description |
 |---|---|
-| **AUTO SP** | PID controls output using normalized percent PV/SP |
+| **AUTO SP** | PID controls output using normalized percent PV/SP (default) |
 | **MANUAL SP** | User sets setpoint manually (raw units), PID remains active |
 | **MANUAL OUT** | User directly controls output (raw units) |
 | **HOLD** | Output frozen at last value |
 
 Mode transitions use **bumpless transfer** to avoid output jumps.
+
+### Runtime Parameters
+
+- **Enabled** – Master enable/disable switch for the controller (default: enabled)
+- **Runtime mode** – Current operating mode (AUTO SP, MANUAL SP, MANUAL OUT, HOLD)
+- **Manual SP value** – Manual setpoint value in raw units (only active in MANUAL SP mode)
+- **Manual OUT value** – Manual output value in raw units (only active in MANUAL OUT mode)
 
 ---
 
@@ -214,22 +230,37 @@ All tuning and limiter parameters are available as number and switch entities.
 
 ### PID & Limits
 
-- Kp, Ki, Kd (**percent-based tuning**)
-- PID deadband (percent)
-- Min output (raw units)
-- Max output (raw units)
+- **Kp, Ki, Kd** – PID gains (percent-based tuning)
+  - Kp: Proportional gain (default: 1.0)
+  - Ki: Integral gain (default: 0.1)
+  - Kd: Derivative gain (default: 0.0)
+- **PID deadband** – Deadband in percent (default: 0.0)
+  - Output changes only when error exceeds this threshold
+- **Min output** – Minimum output value in raw units (default: 0.0)
+- **Max output** – Maximum output value in raw units (default: 11000.0)
 
 ### Grid Limiter
 
-- Grid limiter enabled
-- Grid limiter type (import / export)
-- Grid limiter limit (raw units)
-- Grid limiter deadband
+- **Grid limiter enabled** – Enable/disable grid power limiting (default: disabled)
+- **Grid limiter type** – Import or export limiting
+  - Import: Limits when importing from grid
+  - Export: Limits when exporting to grid
+- **Grid limiter limit** – Limit threshold in raw units (default: 1000.0)
+- **Grid limiter deadband** – Deadband in raw units (default: 50.0)
+  - Hysteresis to prevent oscillation around the limit
 
 ### Rate Limiter
 
-- Rate limiter enabled
-- Rate limit (output units per second)
+- **Rate limiter enabled** – Enable/disable output rate limiting (default: disabled)
+- **Rate limit** – Maximum output change rate in raw units per second (default: 0.0)
+  - Prevents sudden output changes
+
+### Advanced Parameters
+
+- **Max output step** – Maximum allowed output step change (default: 0.0, disabled)
+  - Limits the maximum change per update cycle
+- **Output epsilon** – Minimum output change threshold (default: 0.0, disabled)
+  - Output only changes if the difference exceeds this value
 
 ---
 

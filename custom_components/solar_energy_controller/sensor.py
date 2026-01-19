@@ -252,9 +252,10 @@ class SolarEnergyFlowGridPowerSensor(_BaseFlowSensor):
 
 class SolarEnergyFlowPTermSensor(_BaseFlowSensor):
     _attr_icon = "mdi:alpha-p-circle-outline"
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "P term", "p_term")
+        super().__init__(coordinator, entry, "P term", "p_term", EntityCategory.DIAGNOSTIC)
 
     @property
     def available(self) -> bool:
@@ -274,9 +275,10 @@ class SolarEnergyFlowPTermSensor(_BaseFlowSensor):
 
 class SolarEnergyFlowITermSensor(_BaseFlowSensor):
     _attr_icon = "mdi:alpha-i-circle-outline"
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "I term", "i_term")
+        super().__init__(coordinator, entry, "I term", "i_term", EntityCategory.DIAGNOSTIC)
 
     @property
     def available(self) -> bool:
@@ -296,9 +298,10 @@ class SolarEnergyFlowITermSensor(_BaseFlowSensor):
 
 class SolarEnergyFlowDTermSensor(_BaseFlowSensor):
     _attr_icon = "mdi:alpha-d-circle-outline"
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "D term", "d_term")
+        super().__init__(coordinator, entry, "D term", "d_term", EntityCategory.DIAGNOSTIC)
 
     @property
     def available(self) -> bool:
@@ -318,6 +321,7 @@ class SolarEnergyFlowDTermSensor(_BaseFlowSensor):
 
 class SolarEnergyFlowLimiterStateSensor(_BaseFlowSensor):
     _attr_icon = "mdi:flash-outline"
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "Limiter state", "limiter_state", EntityCategory.DIAGNOSTIC)
@@ -338,6 +342,7 @@ class SolarEnergyFlowLimiterStateSensor(_BaseFlowSensor):
 
 class SolarEnergyFlowOutputPreRateLimitSensor(_BaseFlowSensor):
     _attr_icon = "mdi:tune-vertical"
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(

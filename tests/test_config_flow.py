@@ -42,6 +42,210 @@ def _setup_test_entities(hass: HomeAssistant) -> None:
     hass.states.async_set("sensor.grid_power", "100.0")
 
 
+async def test_user_flow_entity_not_found_pv(hass: HomeAssistant) -> None:
+    """Test user flow with missing PV entity."""
+    # Don't create the PV entity
+    hass.states.async_set("number.setpoint", "60.0")
+    hass.states.async_set("number.output", "55.0")
+    hass.states.async_set("sensor.grid_power", "100.0")
+    
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Test Controller",
+            CONF_PROCESS_VALUE_ENTITY: "sensor.missing_pv",  # Entity doesn't exist
+            CONF_SETPOINT_ENTITY: "number.setpoint",
+            CONF_OUTPUT_ENTITY: "number.output",
+            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+            CONF_PV_MIN: DEFAULT_PV_MIN,
+            CONF_PV_MAX: DEFAULT_PV_MAX,
+            CONF_SP_MIN: DEFAULT_SP_MIN,
+            CONF_SP_MAX: DEFAULT_SP_MAX,
+            CONF_GRID_MIN: DEFAULT_GRID_MIN,
+            CONF_GRID_MAX: DEFAULT_GRID_MAX,
+        },
+    )
+    
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["step_id"] == "user"
+    assert CONF_PROCESS_VALUE_ENTITY in result2["errors"]
+    assert result2["errors"][CONF_PROCESS_VALUE_ENTITY] == "entity_not_found"
+
+
+async def test_user_flow_entity_unavailable_pv(hass: HomeAssistant) -> None:
+    """Test user flow with unavailable PV entity."""
+    hass.states.async_set("sensor.pv_sensor", "unavailable")
+    hass.states.async_set("number.setpoint", "60.0")
+    hass.states.async_set("number.output", "55.0")
+    hass.states.async_set("sensor.grid_power", "100.0")
+    
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Test Controller",
+            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",  # Entity is unavailable
+            CONF_SETPOINT_ENTITY: "number.setpoint",
+            CONF_OUTPUT_ENTITY: "number.output",
+            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+            CONF_PV_MIN: DEFAULT_PV_MIN,
+            CONF_PV_MAX: DEFAULT_PV_MAX,
+            CONF_SP_MIN: DEFAULT_SP_MIN,
+            CONF_SP_MAX: DEFAULT_SP_MAX,
+            CONF_GRID_MIN: DEFAULT_GRID_MIN,
+            CONF_GRID_MAX: DEFAULT_GRID_MAX,
+        },
+    )
+    
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["step_id"] == "user"
+    assert CONF_PROCESS_VALUE_ENTITY in result2["errors"]
+    assert result2["errors"][CONF_PROCESS_VALUE_ENTITY] == "entity_unavailable"
+
+
+async def test_user_flow_entity_not_found_setpoint(hass: HomeAssistant) -> None:
+    """Test user flow with missing setpoint entity."""
+    hass.states.async_set("sensor.pv_sensor", "50.0")
+    # Don't create setpoint entity
+    hass.states.async_set("number.output", "55.0")
+    hass.states.async_set("sensor.grid_power", "100.0")
+    
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Test Controller",
+            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+            CONF_SETPOINT_ENTITY: "number.missing_setpoint",  # Entity doesn't exist
+            CONF_OUTPUT_ENTITY: "number.output",
+            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+            CONF_PV_MIN: DEFAULT_PV_MIN,
+            CONF_PV_MAX: DEFAULT_PV_MAX,
+            CONF_SP_MIN: DEFAULT_SP_MIN,
+            CONF_SP_MAX: DEFAULT_SP_MAX,
+            CONF_GRID_MIN: DEFAULT_GRID_MIN,
+            CONF_GRID_MAX: DEFAULT_GRID_MAX,
+        },
+    )
+    
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["step_id"] == "user"
+    assert CONF_SETPOINT_ENTITY in result2["errors"]
+    assert result2["errors"][CONF_SETPOINT_ENTITY] == "entity_not_found"
+
+
+async def test_user_flow_entity_unavailable_setpoint(hass: HomeAssistant) -> None:
+    """Test user flow with unavailable setpoint entity."""
+    hass.states.async_set("sensor.pv_sensor", "50.0")
+    hass.states.async_set("number.setpoint", "unknown")
+    hass.states.async_set("number.output", "55.0")
+    hass.states.async_set("sensor.grid_power", "100.0")
+    
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Test Controller",
+            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+            CONF_SETPOINT_ENTITY: "number.setpoint",  # Entity is unavailable
+            CONF_OUTPUT_ENTITY: "number.output",
+            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+            CONF_PV_MIN: DEFAULT_PV_MIN,
+            CONF_PV_MAX: DEFAULT_PV_MAX,
+            CONF_SP_MIN: DEFAULT_SP_MIN,
+            CONF_SP_MAX: DEFAULT_SP_MAX,
+            CONF_GRID_MIN: DEFAULT_GRID_MIN,
+            CONF_GRID_MAX: DEFAULT_GRID_MAX,
+        },
+    )
+    
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["step_id"] == "user"
+    assert CONF_SETPOINT_ENTITY in result2["errors"]
+    assert result2["errors"][CONF_SETPOINT_ENTITY] == "entity_unavailable"
+
+
+async def test_user_flow_entity_not_found_output(hass: HomeAssistant) -> None:
+    """Test user flow with missing output entity."""
+    hass.states.async_set("sensor.pv_sensor", "50.0")
+    hass.states.async_set("number.setpoint", "60.0")
+    # Don't create output entity
+    hass.states.async_set("sensor.grid_power", "100.0")
+    
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Test Controller",
+            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+            CONF_SETPOINT_ENTITY: "number.setpoint",
+            CONF_OUTPUT_ENTITY: "number.missing_output",  # Entity doesn't exist
+            CONF_GRID_POWER_ENTITY: "sensor.grid_power",
+            CONF_PV_MIN: DEFAULT_PV_MIN,
+            CONF_PV_MAX: DEFAULT_PV_MAX,
+            CONF_SP_MIN: DEFAULT_SP_MIN,
+            CONF_SP_MAX: DEFAULT_SP_MAX,
+            CONF_GRID_MIN: DEFAULT_GRID_MIN,
+            CONF_GRID_MAX: DEFAULT_GRID_MAX,
+        },
+    )
+    
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["step_id"] == "user"
+    assert CONF_OUTPUT_ENTITY in result2["errors"]
+    assert result2["errors"][CONF_OUTPUT_ENTITY] == "entity_not_found"
+
+
+async def test_user_flow_entity_not_found_grid(hass: HomeAssistant) -> None:
+    """Test user flow with missing grid entity."""
+    hass.states.async_set("sensor.pv_sensor", "50.0")
+    hass.states.async_set("number.setpoint", "60.0")
+    hass.states.async_set("number.output", "55.0")
+    # Don't create grid entity
+    
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Test Controller",
+            CONF_PROCESS_VALUE_ENTITY: "sensor.pv_sensor",
+            CONF_SETPOINT_ENTITY: "number.setpoint",
+            CONF_OUTPUT_ENTITY: "number.output",
+            CONF_GRID_POWER_ENTITY: "sensor.missing_grid",  # Entity doesn't exist
+            CONF_PV_MIN: DEFAULT_PV_MIN,
+            CONF_PV_MAX: DEFAULT_PV_MAX,
+            CONF_SP_MIN: DEFAULT_SP_MIN,
+            CONF_SP_MAX: DEFAULT_SP_MAX,
+            CONF_GRID_MIN: DEFAULT_GRID_MIN,
+            CONF_GRID_MAX: DEFAULT_GRID_MAX,
+        },
+    )
+    
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["step_id"] == "user"
+    assert CONF_GRID_POWER_ENTITY in result2["errors"]
+    assert result2["errors"][CONF_GRID_POWER_ENTITY] == "entity_not_found"
+
+
 async def test_user_flow_success(hass: HomeAssistant) -> None:
     """Test successful user flow."""
     _setup_test_entities(hass)

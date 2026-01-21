@@ -1,4 +1,5 @@
 import { LitElement, html, css } from "https://cdn.jsdelivr.net/gh/lit/dist@2/core/lit-core.min.js";
+import Chart from "/local/vendor/chart.umd.min.js";
 
 class PIDControllerMini extends LitElement {
   static properties = {
@@ -112,6 +113,10 @@ class PIDControllerMini extends LitElement {
   constructor() {
     super();
     this._data = {};
+    this._canvas = null;
+    this._chart = null;
+    this._graphInFlight = false;
+    this._graphUpdateTimeout = null;
   }
 
   setConfig(config) {
@@ -218,7 +223,7 @@ class PIDControllerMini extends LitElement {
     if (changedProperties.has("hass") || changedProperties.has("config")) {
       this._updateData();
       if (this.config.show_chart) {
-        setTimeout(() => this._updateGraph(), 100);
+        this._scheduleGraphUpdate(800);
       }
     }
   }
@@ -237,20 +242,26 @@ class PIDControllerMini extends LitElement {
     if (this._resizeObserver) {
       this._resizeObserver.disconnect();
     }
+    if (this._graphUpdateTimeout) {
+      clearTimeout(this._graphUpdateTimeout);
+    }
+    if (this._chart) {
+      this._chart.destroy();
+      this._chart = null;
+    }
   }
 
-  async _updateGraph() {
-    const entityIds = this._getEntityIds();
-    if (!entityIds || !this.hass) {
-      return;
+  _scheduleGraphUpdate(delayMs = 800) {
+    if (this._graphUpdateTimeout) {
+      clearTimeout(this._graphUpdateTimeout);
     }
+    this._graphUpdateTimeout = setTimeout(() => {
+      this._updateGraph();
+    }, delayMs);
+  }
 
-    // Verify entities exist
-    const pvExists = this.hass.states[entityIds.pv];
-    const spExists = this.hass.states[entityIds.sp];
-    const outputExists = this.hass.states[entityIds.output];
-    
-    if (!pvExists || !spExists || !outputExists) {
+  async _ensureChart() {
+    if (this._chart) {
       return;
     }
 
@@ -259,19 +270,132 @@ class PIDControllerMini extends LitElement {
       return;
     }
 
-    container.innerHTML = "";
+    // Create canvas once
+    if (!this._canvas) {
+      this._canvas = document.createElement("canvas");
+      this._canvas.style.width = "100%";
+      this._canvas.style.height = "200px";
+      this._canvas.style.display = "block";
+      container.appendChild(this._canvas);
+    }
 
-    // Create canvas for line chart
-    const canvas = document.createElement("canvas");
-    const containerWidth = container.offsetWidth || 400;
-    canvas.width = containerWidth;
-    canvas.height = 200;
-    canvas.style.width = "100%";
-    canvas.style.height = "200px";
-    canvas.style.display = "block";
-    container.appendChild(canvas);
+    // Create Chart.js instance once
+    const ctx = this._canvas.getContext("2d");
+    this._chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "PV",
+            data: [],
+            borderColor: "#2196F3",
+            backgroundColor: "transparent",
+            tension: 0.1,
+          },
+          {
+            label: "SP",
+            data: [],
+            borderColor: "#FF9800",
+            backgroundColor: "transparent",
+            tension: 0.1,
+          },
+          {
+            label: "OUTPUT",
+            data: [],
+            borderColor: "#9C27B0",
+            backgroundColor: "transparent",
+            tension: 0.1,
+          },
+        ],
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          intersect: false,
+          mode: "index",
+        },
+        plugins: {
+          legend: {
+            display: true,
+            position: "top",
+            labels: {
+              usePointStyle: true,
+              padding: 10,
+              font: {
+                size: 11,
+              },
+            },
+          },
+          tooltip: {
+            enabled: true,
+          },
+        },
+        scales: {
+          x: {
+            grid: {
+              color: "var(--divider-color, #ddd)",
+            },
+            ticks: {
+              color: "var(--secondary-text-color, #888)",
+              font: {
+                size: 10,
+              },
+              maxTicksLimit: 5,
+              callback: function(value, index, ticks) {
+                const label = this.getLabelForValue(value);
+                if (!label) return "";
+                const date = new Date(label);
+                return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              },
+            },
+          },
+          y: {
+            grid: {
+              color: "var(--divider-color, #ddd)",
+            },
+            ticks: {
+              color: "var(--secondary-text-color, #888)",
+              font: {
+                size: 10,
+              },
+              callback: function(value) {
+                return value.toFixed(0);
+              },
+            },
+          },
+        },
+      },
+    });
 
-    // Fetch history data
+    // Setup resize observer
+    if (!this._resizeObserver) {
+      this._resizeObserver = new ResizeObserver(() => {
+        if (this._chart) {
+          this._chart.resize();
+          this._chart.update("none");
+        }
+      });
+      this._resizeObserver.observe(container);
+    }
+  }
+
+  async _fetchHistory() {
+    const entityIds = this._getEntityIds();
+    if (!entityIds || !this.hass) {
+      return null;
+    }
+
+    const pvExists = this.hass.states[entityIds.pv];
+    const spExists = this.hass.states[entityIds.sp];
+    const outputExists = this.hass.states[entityIds.output];
+    
+    if (!pvExists || !spExists || !outputExists) {
+      return null;
+    }
+
     try {
       const startTime = new Date(Date.now() - 3600000);
       const entityList = `${entityIds.pv},${entityIds.sp},${entityIds.output}`;
@@ -280,44 +404,17 @@ class PIDControllerMini extends LitElement {
       const history = await this.hass.callApi("GET", url);
 
       if (!history || !Array.isArray(history)) {
-        throw new Error("Invalid history data format");
+        return null;
       }
 
-      this._drawChart(canvas, history, entityIds);
-      
-      const resizeObserver = new ResizeObserver(() => {
-        if (canvas.parentElement) {
-          const newWidth = canvas.parentElement.offsetWidth;
-          if (newWidth !== canvas.width) {
-            canvas.width = newWidth;
-            this._drawChart(canvas, history, entityIds);
-          }
-        }
-      });
-      resizeObserver.observe(container);
-      this._resizeObserver = resizeObserver;
+      return this._parseHistory(history, entityIds);
     } catch (err) {
-      const errorMsg = err?.message || (typeof err === 'string' ? err : JSON.stringify(err));
-      container.innerHTML = `<div style='padding: 8px; color: var(--error-color, red); font-size: 12px;'>Graph error: ${errorMsg}</div>`;
+      console.error("Error fetching history:", err);
+      return null;
     }
   }
 
-  _drawChart(canvas, history, entityIds) {
-    const ctx = canvas.getContext("2d");
-    const width = canvas.width;
-    const height = canvas.height;
-    const padding = 40;
-
-    ctx.clearRect(0, 0, width, height);
-
-    if (!history || history.length === 0) {
-      ctx.fillStyle = "var(--secondary-text-color, #888)";
-      ctx.font = "12px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("No data available", width / 2, height / 2);
-      return;
-    }
-
+  _parseHistory(history, entityIds) {
     const data = { pv: [], sp: [], output: [] };
     const allTimes = new Set();
     
@@ -352,99 +449,105 @@ class PIDControllerMini extends LitElement {
       });
     }
     
-    if (data.pv.length === 0 && data.sp.length > 0) {
-    }
-
     if (allTimes.size === 0) {
-      ctx.fillStyle = "var(--secondary-text-color, #888)";
-      ctx.font = "12px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("No data available", width / 2, height / 2);
-      return;
+      return null;
     }
 
     const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
-    const timeRange = sortedTimes[sortedTimes.length - 1] - sortedTimes[0];
-    if (timeRange === 0) return;
+    
+    // Interpolate data points to common time axis
+    const labels = sortedTimes.map(t => new Date(t).toISOString());
+    const pvData = this._interpolateToTimeAxis(data.pv, sortedTimes);
+    const spData = this._interpolateToTimeAxis(data.sp, sortedTimes);
+    const outputData = this._interpolateToTimeAxis(data.output, sortedTimes);
 
-    const allValues = [...data.pv, ...data.sp, ...data.output].map(d => d.value);
-    const minValue = Math.min(...allValues);
-    const maxValue = Math.max(...allValues);
-    const valueRange = maxValue - minValue || 1;
+    return {
+      labels,
+      datasets: [
+        { label: "PV", data: pvData },
+        { label: "SP", data: spData },
+        { label: "OUTPUT", data: outputData },
+      ],
+    };
+  }
 
-    ctx.strokeStyle = "var(--divider-color, #ddd)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padding, padding);
-    ctx.lineTo(padding, height - padding);
-    ctx.lineTo(width - padding, height - padding);
-    ctx.stroke();
-
-    ctx.strokeStyle = "var(--divider-color, #ddd)";
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i <= 5; i++) {
-      const y = padding + (height - 2 * padding) * (1 - i / 5);
-      ctx.beginPath();
-      ctx.moveTo(padding, y);
-      ctx.lineTo(width - padding, y);
-      ctx.stroke();
+  _interpolateToTimeAxis(points, timeAxis) {
+    if (points.length === 0) {
+      return new Array(timeAxis.length).fill(null);
     }
 
-    ctx.fillStyle = "var(--secondary-text-color, #888)";
-    ctx.font = "10px sans-serif";
-    ctx.textAlign = "center";
-    for (let i = 0; i <= 4; i++) {
-      const timeIndex = Math.floor((sortedTimes.length - 1) * i / 4);
-      const time = new Date(sortedTimes[timeIndex]);
-      const x = padding + (width - 2 * padding) * (i / 4);
-      const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      ctx.fillText(timeStr, x, height - padding + 20);
+    const result = [];
+    let pointIndex = 0;
+
+    for (const time of timeAxis) {
+      // Find the closest point or interpolate
+      while (pointIndex < points.length - 1 && points[pointIndex + 1].time < time) {
+        pointIndex++;
+      }
+
+      if (pointIndex >= points.length) {
+        result.push(points[points.length - 1]?.value ?? null);
+      } else if (points[pointIndex].time === time) {
+        result.push(points[pointIndex].value);
+      } else if (pointIndex === 0) {
+        result.push(points[0].value);
+      } else {
+        // Interpolate between two points
+        const prev = points[pointIndex - 1];
+        const next = points[pointIndex];
+        const ratio = (time - prev.time) / (next.time - prev.time);
+        result.push(prev.value + (next.value - prev.value) * ratio);
+      }
     }
 
-    ctx.textAlign = "right";
-    for (let i = 0; i <= 5; i++) {
-      const value = minValue + valueRange * (1 - i / 5);
-      const y = padding + (height - 2 * padding) * (i / 5);
-      ctx.fillText(value.toFixed(0), padding - 5, y + 4);
+    return result;
+  }
+
+  _updateTraces(points) {
+    if (!this._chart || !points) {
+      return;
     }
 
-    const colors = { pv: "#2196F3", sp: "#FF9800", output: "#9C27B0" };
+    this._chart.data.labels = points.labels;
+    points.datasets.forEach((dataset, index) => {
+      if (this._chart.data.datasets[index]) {
+        this._chart.data.datasets[index].data = dataset.data;
+      }
+    });
 
-    Object.keys(colors).forEach((key) => {
-      if (data[key].length === 0) {
+    this._chart.update("none");
+  }
+
+  async _updateGraph() {
+    if (this._graphInFlight) {
+      return;
+    }
+
+    this._graphInFlight = true;
+
+    try {
+      await this._ensureChart();
+      
+      if (!this._chart) {
+        this._graphInFlight = false;
         return;
       }
 
-      ctx.strokeStyle = colors[key];
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-
-      data[key].forEach((point, index) => {
-        const x = padding + (width - 2 * padding) * ((point.time - sortedTimes[0]) / timeRange);
-        const y = padding + (height - 2 * padding) * (1 - (point.value - minValue) / valueRange);
-
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-
-      ctx.stroke();
-    });
-
-    const legendY = padding + 10;
-    let legendX = width - padding - 100;
-    Object.keys(colors).forEach((key) => {
-      const hasData = data[key] && data[key].length > 0;
-      ctx.fillStyle = colors[key];
-      ctx.fillRect(legendX, legendY, 12, 2);
-      ctx.fillStyle = hasData ? "var(--primary-text-color, #000)" : "var(--disabled-text-color, #999)";
-      ctx.font = "11px sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText(key.toUpperCase() + (hasData ? "" : " (no data)"), legendX + 15, legendY + 8);
-      legendX -= 80;
-    });
+      const points = await this._fetchHistory();
+      
+      if (points) {
+        this._updateTraces(points);
+      }
+    } catch (err) {
+      console.error("Error updating graph:", err);
+      const container = this.shadowRoot?.getElementById("graph-container");
+      if (container && !this._chart) {
+        const errorMsg = err?.message || (typeof err === 'string' ? err : JSON.stringify(err));
+        container.innerHTML = `<div style='padding: 8px; color: var(--error-color, red); font-size: 12px;'>Graph error: ${errorMsg}</div>`;
+      }
+    } finally {
+      this._graphInFlight = false;
+    }
   }
 
   _updateData() {

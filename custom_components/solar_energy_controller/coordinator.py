@@ -80,6 +80,8 @@ from .const import (
     DEFAULT_GRID_MAX,
     PID_MODE_DIRECT,
     PID_MODE_REVERSE,
+    GRID_LIMITER_MODE_DIRECT,
+    GRID_LIMITER_MODE_REVERSE,
     GRID_LIMITER_TYPE_EXPORT,
     GRID_LIMITER_TYPE_IMPORT,
     GRID_LIMITER_STATE_NORMAL,
@@ -133,7 +135,6 @@ class RuntimeOptions:
     grid_power_invert: bool
     limiter_enabled: bool
     limiter_type: str
-    limiter_mode: str
     limiter_limit_w: float
     limiter_deadband_w: float
     rate_limiter_enabled: bool
@@ -143,6 +144,7 @@ class RuntimeOptions:
     runtime_mode: str
     max_output_step: float
     output_epsilon: float
+    limiter_mode: str = DEFAULT_GRID_LIMITER_MODE
 
 
 @dataclass

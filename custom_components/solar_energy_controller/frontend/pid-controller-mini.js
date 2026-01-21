@@ -1,5 +1,4 @@
-import { LitElement, html, css } from "https://cdn.jsdelivr.net/gh/lit/dist@2/core/lit-core.min.js";
-import Chart from "./vendor/chart.umd.min.js";
+import { LitElement, html, css } from "lit";
 
 class PIDControllerMini extends LitElement {
   static properties = {
@@ -228,11 +227,28 @@ class PIDControllerMini extends LitElement {
     }
   }
 
-  firstUpdated() {
+  async firstUpdated() {
     if (this.config.show_chart) {
+      await this._loadChartJS();
       setTimeout(() => this._updateGraph(), 200);
       this._graphInterval = setInterval(() => this._updateGraph(), 30000);
     }
+  }
+
+  _loadChartJS() {
+    return new Promise((resolve, reject) => {
+      if (window.Chart) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement("script");
+      // Load Chart.js from the local integration static path so it works offline
+      script.src = "/solar_energy_controller/frontend/chart.umd.min.js";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Failed to load Chart.js"));
+      document.head.appendChild(script);
+    });
   }
 
   disconnectedCallback() {
@@ -281,7 +297,7 @@ class PIDControllerMini extends LitElement {
 
     // Create Chart.js instance once
     const ctx = this._canvas.getContext("2d");
-    this._chart = new Chart(ctx, {
+    this._chart = new window.Chart(ctx, {
       type: "line",
       data: {
         labels: [],

@@ -1003,8 +1003,12 @@ class SolarEnergyFlowCoordinator(DataUpdateCoordinator[FlowState]):
             )
 
         error_pct = sp_for_pid - pv_for_pid
-        if options.pid_mode == PID_MODE_REVERSE:
-            error_pct = -error_pct
+        # When grid limiter is active, always use direct behavior:
+        # more import (PV > SP) → negative error → output down.
+        # Only apply PID mode inversion when limiter is not active.
+        if limiter_result.limiter_state == GRID_LIMITER_STATE_NORMAL:
+            if options.pid_mode == PID_MODE_REVERSE:
+                error_pct = -error_pct
 
         if (
             limiter_result.limiter_state == GRID_LIMITER_STATE_NORMAL

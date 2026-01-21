@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css } from "./lit-core.min.js";
 
 class PIDControllerMini extends LitElement {
   static properties = {
